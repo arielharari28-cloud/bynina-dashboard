@@ -232,11 +232,89 @@ function calcularMasVendidos(orders, desde, hasta, top = 20) {
     .slice(0, top);
 }
 
+// ---------- Categoría y talle (usa metadata de productos/variantes) ----------
+function calcularPorCategoria(orders, desde, hasta, productMeta, top = 8) {
+  const pagados = orders.filter(
+    (o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o)
+  );
+  const acc = new Map(); // categoria -> {unidades, facturacion}
+  pagados.forEach((o) => {
+    (o.products || []).forEach((li) => {
+      const meta = productMeta.get(li.product_id);
+      const categoria = (meta && meta.categoria) || "Sin categoría";
+      const prev = acc.get(categoria) || { categoria, unidades: 0, facturacion: 0 };
+      prev.unidades += Number(li.quantity || 0);
+      prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
+      acc.set(categoria, prev);
+    });
+  });
+  return Array.from(acc.values())
+    .sort((a, b) => b.unidades - a.unidades)
+    .slice(0, top);
+}
+
+function calcularPorTalle(orders, desde, hasta, variantMeta, top = 12) {
+  const pagados = orders.filter(
+    (o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o)
+  );
+  const acc = new Map(); // talle -> {unidades, facturacion}
+  pagados.forEach((o) => {
+    (o.products || []).forEach((li) => {
+      const meta = variantMeta.get(li.variant_id);
+      const talle = (meta && meta.talle) || "Sin talle";
+      const prev = acc.get(talle) || { talle, unidades: 0, facturacion: 0 };
+      prev.unidades += Number(li.quantity || 0);
+      prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
+      acc.set(talle, prev);
+    });
+  });
+  return Array.from(acc.values())
+    .sort((a, b) => b.unidades - a.unidades)
+    .slice(0, top);
+}
+
+// ---------- Metadata de productos/variantes (categoría, talle) ----------
+function construirMetadata(products) {
+  const productMeta = new Map(); // product_id -> {categoria}
+  const variantMeta = new Map(); // variant_id -> {talle, color}
+
+  products.forEach((p) => {
+    const categoria = p.categories?.[0]?.name?.es || p.categories?.[0]?.name || null;
+    productMeta.set(p.id, { categoria });
+
+    (p.variants || []).forEach((v) => {
+      // Convención observada en el catálogo: values[0] = color, values[1] = talle.
+      // Si algún producto usa otro orden, esto puede necesitar ajuste manual.
+      productMeta.set(p.id, { categoria });
+      variantMeta.set(v.id, {
+        color: v.values?.[0]?.es || null,
+        talle: v.values?.[1]?.es || v.values?.[0]?.es || null,
+      });
+    });
+  });
+
+  return { productMeta, variantMeta };
+}
+
+// ---------- Nuevos ingresos ----------
+function calcularNuevosIngresos(products, dias = 15, top = 20) {
+  const corte = daysAgo(dias);
+  return products
+    .filter((p) => p.created_at && new Date(p.created_at) >= corte)
+    .map((p) => ({
+      producto: p.name?.es || p.name,
+      imagen: p.images?.[0]?.src || null,
+      fecha: p.created_at,
+    }))
+    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
+    .slice(0, top);
+}
+
 function calcularStockYAlertas(products) {
   // Agrupado por producto: cada producto tiene un stock total y su lista
   // de variantes adentro (para "agrupar por variantes" en el dashboard).
   const stockPorProducto = [];
-  const ultimasUnidades = [];
+  const ultimasUnidadesPorArticulo = [];
 
   products.forEach((p) => {
     const nombre = p.name?.es || p.name;
@@ -259,21 +337,22 @@ function calcularStockYAlertas(products) {
       variantes: variantes.sort((a, b) => (a.stock || 0) - (b.stock || 0)),
     });
 
-    variantes.forEach((v) => {
-      if (v.stock !== null && v.stock > 0 && v.stock <= LOW_STOCK_THRESHOLD) {
-        ultimasUnidades.push({
-          producto: nombre,
-          variante: v.variante,
-          unidades: v.stock,
-          imagen,
-        });
-      }
-    });
+    // Alerta agrupada por artículo: sumamos las unidades de las variantes
+    // con poco stock y listamos cuáles son, en vez de una fila por variante.
+    const variantesBajas = variantes.filter((v) => v.stock !== null && v.stock > 0 && v.stock <= LOW_STOCK_THRESHOLD);
+    if (variantesBajas.length > 0) {
+      ultimasUnidadesPorArticulo.push({
+        producto: nombre,
+        imagen,
+        unidadesBajas: variantesBajas.reduce((acc, v) => acc + v.stock, 0),
+        variantes: variantesBajas.map((v) => `${v.variante} (${v.stock})`).join(", "),
+      });
+    }
   });
 
   stockPorProducto.sort((a, b) => a.stockTotal - b.stockTotal);
-  ultimasUnidades.sort((a, b) => a.unidades - b.unidades);
-  return { stockPorProducto, ultimasUnidades };
+  ultimasUnidadesPorArticulo.sort((a, b) => a.unidadesBajas - b.unidadesBajas);
+  return { stockPorProducto, ultimasUnidadesPorArticulo };
 }
 
 function calcularSinVentas(products, orders) {
@@ -340,25 +419,35 @@ async function main() {
   const products = await fetchAllPages("/products");
   console.log(`Productos traídos: ${products.length}`);
 
+  const { productMeta, variantMeta } = construirMetadata(products);
+
   const periods = buildPeriods();
   const kpisPorPeriodo = {};
   const masVendidosPorPeriodo = {};
+  const porCategoriaPorPeriodo = {};
+  const porTallePorPeriodo = {};
 
   Object.entries(periods).forEach(([key, { desde, hasta }]) => {
     kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta);
     masVendidosPorPeriodo[key] = calcularMasVendidos(orders, desde, hasta);
+    porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta);
+    porTallePorPeriodo[key] = calcularPorTalle(orders, desde, hasta, variantMeta);
   });
 
-  const { stockPorProducto, ultimasUnidades } = calcularStockYAlertas(products);
+  const { stockPorProducto, ultimasUnidadesPorArticulo } = calcularStockYAlertas(products);
   const { sinVentasCount, sinVentasRecientes } = calcularSinVentas(products, orders);
+  const nuevosIngresos = calcularNuevosIngresos(products, 15);
 
   const db = initFirebase();
   const payload = {
     actualizado: new Date().toISOString(),
     kpisPorPeriodo,
     masVendidosPorPeriodo,
-    ultimasUnidades,
+    porCategoriaPorPeriodo,
+    porTallePorPeriodo,
+    ultimasUnidadesPorArticulo,
     stockPorProducto,
+    nuevosIngresos,
     sinVentas: { total: sinVentasCount, recientes: sinVentasRecientes },
   };
 
