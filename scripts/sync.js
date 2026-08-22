@@ -162,6 +162,16 @@ function inRange(dateStr, desde, hasta) {
   return d >= desde && d <= hasta;
 }
 
+function calcularFacturacion(pagados) {
+  let total = 0;
+  pagados.forEach((o) => {
+    (o.products || []).forEach((li) => {
+      total += Number(li.price || 0) * Number(li.quantity || 0);
+    });
+  });
+  return total;
+}
+
 function calcularKpisPeriodo(orders, desde, hasta) {
   const enRango = orders.filter((o) => inRange(o.created_at, desde, hasta) && pedidoCuenta(o));
   const pagados = enRango.filter(itemsCuentanVenta);
@@ -175,8 +185,13 @@ function calcularKpisPeriodo(orders, desde, hasta) {
     });
   });
 
+  const facturacionTotal = calcularFacturacion(pagados);
+  const ticketPromedio = pagados.length > 0 ? facturacionTotal / pagados.length : 0;
+
   const prev = previousRange(desde, hasta);
   const enRangoPrev = orders.filter((o) => inRange(o.created_at, prev.desde, prev.hasta) && pedidoCuenta(o));
+  const pagadosPrev = enRangoPrev.filter(itemsCuentanVenta);
+  const facturacionAnterior = calcularFacturacion(pagadosPrev);
 
   return {
     pedidos: enRango.length,
@@ -184,22 +199,33 @@ function calcularKpisPeriodo(orders, desde, hasta) {
     unidadesVendidas,
     productosVendidos: productosVendidosSet.size,
     productosVendidosIds: Array.from(productosVendidosSet),
+    facturacionTotal,
+    facturacionAnterior,
+    ticketPromedio,
   };
 }
 
-function calcularMasVendidos(orders, desde, hasta, top = 10) {
+function calcularMasVendidos(orders, desde, hasta, top = 20) {
   const pagados = orders.filter(
     (o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o)
   );
-  const acc = new Map(); // product_id -> {name, image, unidades}
+  const acc = new Map(); // product_id -> {name, image, unidades, facturacion}
   pagados.forEach((o) => {
     (o.products || []).forEach((li) => {
       const key = li.product_id;
-      const prev = acc.get(key) || { producto: li.name, unidades: 0, imagen: null };
+      const prev = acc.get(key) || {
+        producto: li.name,
+        unidades: 0,
+        facturacion: 0,
+        imagen: li.image?.src || null,
+      };
       prev.unidades += Number(li.quantity || 0);
+      prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
       acc.set(key, prev);
     });
   });
+  // Devolvemos ordenado por unidades por default; el frontend puede
+  // reordenar localmente por facturación sin pedir datos de nuevo.
   return Array.from(acc.entries())
     .map(([id, v]) => ({ id, ...v }))
     .sort((a, b) => b.unidades - a.unidades)
@@ -207,31 +233,47 @@ function calcularMasVendidos(orders, desde, hasta, top = 10) {
 }
 
 function calcularStockYAlertas(products) {
-  const stockGeneral = [];
+  // Agrupado por producto: cada producto tiene un stock total y su lista
+  // de variantes adentro (para "agrupar por variantes" en el dashboard).
+  const stockPorProducto = [];
   const ultimasUnidades = [];
 
   products.forEach((p) => {
-    (p.variants || []).forEach((v) => {
+    const nombre = p.name?.es || p.name;
+    const imagen = p.images?.[0]?.src || null;
+    const variantes = (p.variants || []).map((v) => {
       const stock = v.stock === null || v.stock === undefined ? null : Number(v.stock);
-      stockGeneral.push({
-        producto: p.name?.es || p.name,
+      return {
         sku: v.sku || null,
-        variante: [v.values?.[0]?.es, v.values?.[1]?.es].filter(Boolean).join(" / "),
+        variante: [v.values?.[0]?.es, v.values?.[1]?.es].filter(Boolean).join(" / ") || "Único",
         stock,
-      });
-      if (stock !== null && stock > 0 && stock <= LOW_STOCK_THRESHOLD) {
+      };
+    });
+
+    const stockTotal = variantes.reduce((acc, v) => acc + (v.stock || 0), 0);
+
+    stockPorProducto.push({
+      producto: nombre,
+      imagen,
+      stockTotal,
+      variantes: variantes.sort((a, b) => (a.stock || 0) - (b.stock || 0)),
+    });
+
+    variantes.forEach((v) => {
+      if (v.stock !== null && v.stock > 0 && v.stock <= LOW_STOCK_THRESHOLD) {
         ultimasUnidades.push({
-          producto: p.name?.es || p.name,
-          variante: [v.values?.[0]?.es, v.values?.[1]?.es].filter(Boolean).join(" / "),
-          unidades: stock,
-          imagen: p.images?.[0]?.src || null,
+          producto: nombre,
+          variante: v.variante,
+          unidades: v.stock,
+          imagen,
         });
       }
     });
   });
 
+  stockPorProducto.sort((a, b) => a.stockTotal - b.stockTotal);
   ultimasUnidades.sort((a, b) => a.unidades - b.unidades);
-  return { stockGeneral, ultimasUnidades };
+  return { stockPorProducto, ultimasUnidades };
 }
 
 function calcularSinVentas(products, orders) {
@@ -307,7 +349,7 @@ async function main() {
     masVendidosPorPeriodo[key] = calcularMasVendidos(orders, desde, hasta);
   });
 
-  const { stockGeneral, ultimasUnidades } = calcularStockYAlertas(products);
+  const { stockPorProducto, ultimasUnidades } = calcularStockYAlertas(products);
   const { sinVentasCount, sinVentasRecientes } = calcularSinVentas(products, orders);
 
   const db = initFirebase();
@@ -316,7 +358,7 @@ async function main() {
     kpisPorPeriodo,
     masVendidosPorPeriodo,
     ultimasUnidades,
-    stockGeneral,
+    stockPorProducto,
     sinVentas: { total: sinVentasCount, recientes: sinVentasRecientes },
   };
 
