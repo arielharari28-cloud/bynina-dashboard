@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ByNINA — Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<div class="flex min-h-screen">
+  <!-- Sidebar -->
+  <aside class="hidden md:flex w-[220px] shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0">
+    <div class="px-5 py-5 border-b border-slate-100">
+      <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1">ByNINA</div>
+      <div class="text-lg font-bold text-slate-800 leading-tight">Dashboard</div>
+    </div>
+    <nav class="flex-1 py-4 px-2 space-y-0.5">
+      <div class="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 font-semibold text-sm flex items-center gap-2">
+        📊 Dashboard
+      </div>
+    </nav>
+    <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">
+      Datos vía Tienda Nube
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 min-w-0 p-4 md:p-6 max-w-[1200px] mx-auto">
+
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+      <div>
+        <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
+        <p id="ultimaActualizacion" class="text-xs text-slate-400 mt-0.5">Cargando datos...</p>
+      </div>
+      <button id="btnActualizar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2">
+        <span id="iconRefresh">🔄</span> Actualizar ahora
+      </button>
+    </div>
+
+    <!-- Filtros de período -->
+    <div class="mb-6 flex flex-wrap gap-1.5 items-center" id="filtros">
+      <button data-periodo="hoy" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Hoy</button>
+      <button data-periodo="ayer" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Ayer</button>
+      <button data-periodo="7dias" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">7 días</button>
+      <button data-periodo="15dias" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">15 días</button>
+      <button data-periodo="30dias" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-indigo-600 text-white shadow-sm">30 días</button>
+      <button data-periodo="estemes" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Este mes</button>
+      <button data-periodo="mesanterior" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Mes anterior</button>
+    </div>
+
+    <div id="loading" class="flex items-center justify-center h-48 text-slate-400 gap-3">
+      <div class="w-5 h-5 border-2 border-slate-200 border-t-indigo-500 rounded-full spin"></div>
+      Cargando...
+    </div>
+
+    <div id="contenido" class="hidden">
+
+      <!-- KPIs -->
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Ventas del período</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold text-slate-500 uppercase">Pedidos</span>
+            <span>🛒</span>
+          </div>
+          <div id="kpiPedidos" class="text-3xl font-bold text-slate-900">—</div>
+          <div id="kpiPedidosPrev" class="text-xs text-slate-400 mt-1"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold text-slate-500 uppercase">Unidades vendidas</span>
+            <span>📦</span>
+          </div>
+          <div id="kpiUnidades" class="text-3xl font-bold text-slate-900">—</div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold text-slate-500 uppercase">Productos vendidos</span>
+            <span>🏷️</span>
+          </div>
+          <div id="kpiProductos" class="text-3xl font-bold text-slate-900">—</div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold text-slate-500 uppercase">Sin ventas</span>
+            <span>📭</span>
+          </div>
+          <div id="kpiSinVentas" class="text-3xl font-bold text-slate-900">—</div>
+        </div>
+      </div>
+
+      <!-- Listas -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="font-semibold text-slate-800 mb-3">🏆 Más vendidos</div>
+          <div id="listaMasVendidos" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="font-semibold text-slate-800 mb-3">⚠️ Últimas unidades</div>
+          <div id="listaUltimasUnidades" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 p-5">
+          <div class="font-semibold text-slate-800 mb-3">📭 Sin ventas recientes</div>
+          <div id="listaSinVentas" class="space-y-2 text-sm"></div>
+        </div>
+      </div>
+
+      <!-- Stock general -->
+      <div class="bg-white rounded-xl border border-slate-200 p-5">
+        <div class="font-semibold text-slate-800 mb-3">📦 Stock general</div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100">
+                <th class="py-2 pr-3">Producto</th>
+                <th class="py-2 pr-3">Variante</th>
+                <th class="py-2 pr-3">SKU</th>
+                <th class="py-2 pr-3 text-right">Stock</th>
+              </tr>
+            </thead>
+            <tbody id="tablaStock"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  // ---------------------------------------------------------------
+  // Config de Firebase — SOLO lectura desde acá. Las reglas de la
+  // Realtime Database deben permitir "read" público (o autenticado)
+  // en /dashboard y bloquear "write" excepto desde la GitHub Action.
+  // ---------------------------------------------------------------
+  const firebaseConfig = {
+    apiKey: "TU_API_KEY",
+    databaseURL: "https://bynina-c1eec-default-rtdb.firebaseio.com",
+    projectId: "bynina-c1eec",
+  };
+
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  let dashboardData = null;
+  let periodoActual = "30dias";
+
+  const fmtNum = (n) => (n === null || n === undefined ? "—" : Number(n).toLocaleString("es-AR"));
+
+  function render() {
+    if (!dashboardData) return;
+
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("contenido").classList.remove("hidden");
+
+    const actualizado = new Date(dashboardData.actualizado);
+    document.getElementById("ultimaActualizacion").textContent =
+      "Actualizado: " + actualizado.toLocaleString("es-AR");
+
+    const kpis = (dashboardData.kpisPorPeriodo || {})[periodoActual] || {};
+    document.getElementById("kpiPedidos").textContent = fmtNum(kpis.pedidos);
+    document.getElementById("kpiPedidosPrev").textContent =
+      kpis.pedidosAnterior !== undefined ? `vs ${fmtNum(kpis.pedidosAnterior)} anterior` : "";
+    document.getElementById("kpiUnidades").textContent = fmtNum(kpis.unidadesVendidas);
+    document.getElementById("kpiProductos").textContent = fmtNum(kpis.productosVendidos);
+    document.getElementById("kpiSinVentas").textContent = fmtNum(
+      dashboardData.sinVentas ? dashboardData.sinVentas.total : null
+    );
+
+    // Más vendidos
+    const masVendidos = (dashboardData.masVendidosPorPeriodo || {})[periodoActual] || [];
+    const elMasVendidos = document.getElementById("listaMasVendidos");
+    elMasVendidos.innerHTML = masVendidos.length
+      ? masVendidos
+          .map(
+            (p, i) => `
+        <div class="flex items-center justify-between gap-2">
+          <span class="text-slate-500 w-4">${i + 1}</span>
+          <span class="flex-1 truncate">${p.producto}</span>
+          <span class="font-semibold text-indigo-600 shrink-0">${fmtNum(p.unidades)} u.</span>
+        </div>`
+          )
+          .join("")
+      : '<div class="text-slate-400 text-sm">Sin datos para este período.</div>';
+
+    // Últimas unidades
+    const ultimas = dashboardData.ultimasUnidades || [];
+    const elUltimas = document.getElementById("listaUltimasUnidades");
+    elUltimas.innerHTML = ultimas.length
+      ? ultimas
+          .slice(0, 10)
+          .map(
+            (p) => `
+        <div class="flex items-center justify-between gap-2">
+          <span class="flex-1 truncate">${p.producto}${p.variante ? " · " + p.variante : ""}</span>
+          <span class="font-semibold text-amber-600 shrink-0">${fmtNum(p.unidades)} u.</span>
+        </div>`
+          )
+          .join("")
+      : '<div class="text-slate-400 text-sm">Sin alertas de stock bajo.</div>';
+
+    // Sin ventas recientes
+    const sinVentas = (dashboardData.sinVentas && dashboardData.sinVentas.recientes) || [];
+    const elSinVentas = document.getElementById("listaSinVentas");
+    elSinVentas.innerHTML = sinVentas.length
+      ? sinVentas
+          .slice(0, 10)
+          .map(
+            (p) => `
+        <div class="flex items-center justify-between gap-2">
+          <span class="flex-1 truncate">${p.producto}</span>
+          <span class="text-slate-400 shrink-0">${p.dias === null ? "sin ventas" : p.dias + "d"}</span>
+        </div>`
+          )
+          .join("")
+      : '<div class="text-slate-400 text-sm">Todo con ventas recientes.</div>';
+
+    // Stock general (tabla)
+    const stock = dashboardData.stockGeneral || [];
+    const tbody = document.getElementById("tablaStock");
+    tbody.innerHTML = stock
+      .slice(0, 100)
+      .map(
+        (s) => `
+      <tr class="border-b border-slate-50">
+        <td class="py-2 pr-3">${s.producto}</td>
+        <td class="py-2 pr-3 text-slate-500">${s.variante || "—"}</td>
+        <td class="py-2 pr-3 text-slate-400">${s.sku || "—"}</td>
+        <td class="py-2 pr-3 text-right font-semibold ${s.stock <= 8 ? "text-amber-600" : "text-slate-700"}">${fmtNum(s.stock)}</td>
+      </tr>`
+      )
+      .join("");
+  }
+
+  function cargarDatos() {
+    db.ref("dashboard").on(
+      "value",
+      (snap) => {
+        dashboardData = snap.val();
+        render();
+      },
+      (err) => {
+        document.getElementById("loading").innerHTML =
+          '<div class="text-red-500 text-sm">Error cargando datos: ' + err.message + "</div>";
+      }
+    );
+  }
+
+  document.querySelectorAll(".periodo-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      periodoActual = btn.dataset.periodo;
+      document.querySelectorAll(".periodo-btn").forEach((b) => {
+        b.classList.remove("bg-indigo-600", "text-white", "shadow-sm");
+        b.classList.add("bg-white", "text-slate-600", "border", "border-slate-200");
+      });
+      btn.classList.remove("bg-white", "text-slate-600", "border", "border-slate-200");
+      btn.classList.add("bg-indigo-600", "text-white", "shadow-sm");
+      render();
+    });
+  });
+
+  // El botón "Actualizar ahora" dispara la GitHub Action vía workflow_dispatch.
+  // Requiere un token de GitHub con permiso mínimo "Actions: write" guardado
+  // de forma segura (ver README) — si no está configurado, el botón solo
+  // vuelve a leer lo último que haya en Firebase.
+  document.getElementById("btnActualizar").addEventListener("click", async () => {
+    const btn = document.getElementById("btnActualizar");
+    const icon = document.getElementById("iconRefresh");
+    btn.disabled = true;
+    icon.classList.add("spin");
+    // Placeholder: la llamada real a la GitHub Action se agrega en el
+    // paso de configuración final (ver README del repo).
+    setTimeout(() => {
+      btn.disabled = false;
+      icon.classList.remove("spin");
+    }, 1500);
+  });
+
+  cargarDatos();
+</script>
+
+</body>
+</html>

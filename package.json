@@ -1,0 +1,16 @@
+{
+  "name": "bynina-dashboard-sync",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sincroniza datos de Tienda Nube con Firebase para el dashboard de ByNINA",
+  "main": "scripts/sync.js",
+  "scripts": {
+    "sync": "node scripts/sync.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.6.0"
+  }
+}
