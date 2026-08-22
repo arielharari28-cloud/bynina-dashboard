@@ -48,14 +48,30 @@ async function tnFetch(path, params = {}) {
     if (v !== undefined && v !== null) url.searchParams.set(k, v);
   });
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authentication: `bearer ${TN_ACCESS_TOKEN}`,
-      Authorization: `bearer ${TN_ACCESS_TOKEN}`,
-      "User-Agent": USER_AGENT,
-      "Content-Type": "application/json",
-    },
-  });
+  // Timeout de seguridad: si Tienda Nube no responde en 20s, cortamos
+  // el pedido en vez de dejar el proceso colgado esperando para siempre.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  let res;
+  try {
+    res = await fetch(url.toString(), {
+      headers: {
+        Authentication: `bearer ${TN_ACCESS_TOKEN}`,
+        Authorization: `bearer ${TN_ACCESS_TOKEN}`,
+        "User-Agent": USER_AGENT,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error(`Tienda Nube API: timeout de 20s en ${path}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const body = await res.text();
@@ -307,9 +323,20 @@ async function main() {
   console.log("Escribiendo en Firebase...");
   await db.ref("dashboard").set(payload);
   console.log("Listo. Dashboard actualizado.");
+
+  // IMPORTANTE: Firebase Admin (Realtime Database) mantiene una conexión
+  // abierta tipo socket para poder escuchar cambios en vivo. Sin este
+  // cierre explícito, el proceso de Node nunca termina solo, y el job
+  // de GitHub Actions queda "corriendo" para siempre aunque ya haya
+  // escrito todo correctamente.
+  await admin.app().delete();
 }
 
-main().catch((err) => {
-  console.error("Error en sync.js:", err);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error("Error en sync.js:", err);
+    process.exit(1);
+  });
