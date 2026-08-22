@@ -3,132 +3,283 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ByNINA — Dashboard</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"></script>
+<title>byNINA — Dashboard</title>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@1,9..144,500&display=swap" rel="stylesheet">
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-  .spin { animation: spin 1s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  :root{
+    --bg:#F6F2EA;
+    --paper:#FFFFFF;
+    --ink:#241E1B;
+    --ink-soft:#6B615A;
+    --line:#E7DFD1;
+    --wine:#7A2740;
+    --wine-ink:#5C1D30;
+    --wine-soft:#F3E1E4;
+    --gold:#B8892F;
+    --gold-soft:#F4E9D3;
+    --sage:#4B7357;
+    --sage-soft:#E5EDE3;
+    --amber:#B5651D;
+    --amber-soft:#F6E6D3;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .font-display{font-family:'Bricolage Grotesque',sans-serif;}
+  .font-logo{font-family:'Fraunces',serif; font-style:italic;}
+  .tabular{font-variant-numeric:tabular-nums;}
+
+  .layout{display:flex; min-height:100vh;}
+
+  /* Sidebar */
+  .sidebar{
+    width:230px; flex-shrink:0; background:var(--ink); color:#F6F2EA;
+    display:flex; flex-direction:column; position:sticky; top:0; height:100vh;
+  }
+  .sidebar-logo{padding:28px 22px 20px; border-bottom:1px solid rgba(255,255,255,0.08);}
+  .sidebar-eyebrow{font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:rgba(246,242,234,0.45); margin-bottom:6px;}
+  .sidebar-title{font-size:22px; font-weight:500;}
+  .sidebar-nav{padding:18px 14px; flex:1;}
+  .sidebar-item{
+    display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
+    font-size:14px; font-weight:600; background:rgba(255,255,255,0.08); color:#fff;
+  }
+  .sidebar-foot{padding:16px 22px; font-size:11px; color:rgba(246,242,234,0.4); border-top:1px solid rgba(255,255,255,0.08);}
+
+  main{flex:1; min-width:0; padding:28px 32px 60px; max-width:1280px; margin:0 auto;}
+
+  /* Header */
+  .header-row{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:22px;}
+  .updated{font-size:12px; color:var(--ink-soft); margin-top:4px;}
+  .updated .dot{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--sage); margin-right:6px;}
+
+  /* Tag-shaped button, like a clothing swing tag */
+  .tag-btn{
+    position:relative; display:inline-flex; align-items:center; gap:8px;
+    padding:9px 16px 9px 22px; background:var(--wine); color:#fff; border:none;
+    font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer;
+    border-radius:3px 10px 10px 3px; transition:background .15s ease;
+  }
+  .tag-btn:hover{background:var(--wine-ink);}
+  .tag-btn:disabled{opacity:.55; cursor:default;}
+  .tag-btn::before{
+    content:''; position:absolute; left:8px; top:50%; transform:translateY(-50%);
+    width:6px; height:6px; border-radius:50%; background:var(--bg);
+  }
+  .spin{animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  /* Period pills */
+  .pills{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:26px;}
+  .pill{
+    padding:7px 15px; border-radius:999px; font-size:12.5px; font-weight:600;
+    background:var(--paper); color:var(--ink-soft); border:1px solid var(--line); cursor:pointer;
+    transition:all .12s ease;
+  }
+  .pill:hover{border-color:var(--wine); color:var(--wine);}
+  .pill.active{background:var(--ink); color:#fff; border-color:var(--ink);}
+
+  .section-eyebrow{
+    font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-soft); margin:0 0 10px 2px;
+  }
+
+  /* KPI cards */
+  .kpi-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:28px;}
+  @media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr);}}
+  .kpi-card{
+    background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+    padding:18px 18px 16px; position:relative; overflow:hidden;
+  }
+  .kpi-card::after{
+    content:''; position:absolute; right:-18px; top:-18px; width:64px; height:64px;
+    border-radius:50%; background:var(--accent-tint,var(--wine-soft)); opacity:.6;
+  }
+  .kpi-label{font-size:12px; font-weight:600; color:var(--ink-soft); display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; position:relative;}
+  .kpi-value{font-family:'Bricolage Grotesque',sans-serif; font-size:30px; font-weight:700; line-height:1; position:relative;}
+  .kpi-delta{font-size:12px; margin-top:8px; font-weight:600; position:relative;}
+  .kpi-delta.up{color:var(--sage);}
+  .kpi-delta.down{color:var(--amber);}
+
+  /* Panels */
+  .panel-grid{display:grid; grid-template-columns:1.1fr .9fr; gap:16px; margin-bottom:20px;}
+  @media(max-width:900px){.panel-grid{grid-template-columns:1fr;}}
+  .panel{background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px;}
+  .panel-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
+  .panel-title{font-family:'Bricolage Grotesque',sans-serif; font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px;}
+
+  .seg{display:flex; background:var(--bg); border-radius:8px; padding:3px; gap:2px;}
+  .seg button{
+    border:none; background:transparent; font-size:11.5px; font-weight:700; padding:5px 10px;
+    border-radius:6px; cursor:pointer; color:var(--ink-soft);
+  }
+  .seg button.active{background:var(--paper); color:var(--wine); box-shadow:0 1px 2px rgba(0,0,0,.08);}
+
+  .rank-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);}
+  .rank-row:last-child{border-bottom:none;}
+  .rank-num{
+    width:20px; height:20px; border-radius:50%; background:var(--wine-soft); color:var(--wine-ink);
+    font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .rank-name{flex:1; min-width:0; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .rank-value{font-size:13px; font-weight:700; color:var(--wine-ink); flex-shrink:0; font-family:'Bricolage Grotesque',sans-serif;}
+
+  .alert-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);}
+  .alert-row:last-child{border-bottom:none;}
+  .alert-name{flex:1; min-width:0; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .alert-badge{
+    font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; flex-shrink:0;
+    background:var(--amber-soft); color:var(--amber);
+  }
+  .alert-badge.empty{background:var(--sage-soft); color:var(--sage);}
+
+  .empty-note{font-size:12.5px; color:var(--ink-soft); padding:6px 0;}
+
+  /* Stock table */
+  .stock-toolbar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap;}
+  .search-input{
+    flex:1; min-width:180px; padding:9px 14px; border:1px solid var(--line); border-radius:9px;
+    font-size:13px; font-family:'Inter',sans-serif; background:var(--bg);
+  }
+  .search-input:focus{outline:2px solid var(--wine); outline-offset:1px; background:var(--paper);}
+
+  .prod-row{border-bottom:1px solid var(--line);}
+  .prod-row:last-child{border-bottom:none;}
+  .prod-head{
+    display:flex; align-items:center; gap:12px; padding:12px 4px; cursor:pointer; user-select:none;
+  }
+  .prod-head:hover{background:var(--bg);}
+  .prod-thumb{width:38px; height:46px; border-radius:6px; object-fit:cover; background:var(--line); flex-shrink:0;}
+  .prod-name{flex:1; min-width:0; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .prod-stock{font-family:'Bricolage Grotesque',sans-serif; font-weight:700; font-size:14px; flex-shrink:0;}
+  .prod-stock.low{color:var(--amber);}
+  .chevron{width:9px; height:9px; border-right:2px solid var(--ink-soft); border-bottom:2px solid var(--ink-soft); transform:rotate(-45deg); transition:transform .15s ease; flex-shrink:0; margin-right:2px;}
+  .prod-row.open .chevron{transform:rotate(45deg);}
+  .variantes{display:none; padding:0 4px 12px 50px;}
+  .prod-row.open .variantes{display:block;}
+  .variante-row{display:flex; justify-content:space-between; padding:5px 0; font-size:12.5px; color:var(--ink-soft); border-bottom:1px dashed var(--line);}
+  .variante-row:last-child{border-bottom:none;}
+  .variante-stock{font-weight:700; font-family:'Bricolage Grotesque',sans-serif;}
+  .variante-stock.low{color:var(--amber);}
+
+  .th-sort{cursor:pointer; user-select:none;}
+  .th-sort:hover{color:var(--wine);}
+  .loading-wrap{display:flex; align-items:center; gap:10px; color:var(--ink-soft); padding:60px 0; font-size:14px; justify-content:center;}
+  .loading-dot{width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--wine); border-radius:50%; animation:spin 1s linear infinite;}
+  .hidden{display:none !important;}
 </style>
 </head>
-<body class="bg-slate-50 min-h-screen">
+<body>
 
-<div class="flex min-h-screen">
-  <!-- Sidebar -->
-  <aside class="hidden md:flex w-[220px] shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0">
-    <div class="px-5 py-5 border-b border-slate-100">
-      <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1">ByNINA</div>
-      <div class="text-lg font-bold text-slate-800 leading-tight">Dashboard</div>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-eyebrow">byNINA</div>
+      <div class="sidebar-title font-logo">Dashboard</div>
     </div>
-    <nav class="flex-1 py-4 px-2 space-y-0.5">
-      <div class="px-3 py-2 rounded-lg bg-indigo-50 text-indigo-700 font-semibold text-sm flex items-center gap-2">
-        📊 Dashboard
-      </div>
+    <nav class="sidebar-nav">
+      <div class="sidebar-item">📊 Ventas &amp; stock</div>
     </nav>
-    <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">
-      Datos vía Tienda Nube
-    </div>
+    <div class="sidebar-foot">Sincronizado desde Tienda Nube</div>
   </aside>
 
-  <!-- Main -->
-  <main class="flex-1 min-w-0 p-4 md:p-6 max-w-[1200px] mx-auto">
-
-    <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+  <main>
+    <div class="header-row">
       <div>
-        <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
-        <p id="ultimaActualizacion" class="text-xs text-slate-400 mt-0.5">Cargando datos...</p>
+        <div class="font-display" style="font-size:22px; font-weight:700;">Panel general</div>
+        <div class="updated" id="ultimaActualizacion"><span class="dot"></span>Cargando datos...</div>
       </div>
-      <button id="btnActualizar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors flex items-center gap-2">
-        <span id="iconRefresh">🔄</span> Actualizar ahora
+      <button id="btnActualizar" class="tag-btn">
+        <span id="iconRefresh">Actualizar</span>
       </button>
     </div>
 
-    <!-- Filtros de período -->
-    <div class="mb-6 flex flex-wrap gap-1.5 items-center" id="filtros">
-      <button data-periodo="hoy" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Hoy</button>
-      <button data-periodo="ayer" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Ayer</button>
-      <button data-periodo="7dias" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">7 días</button>
-      <button data-periodo="15dias" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">15 días</button>
-      <button data-periodo="30dias" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-indigo-600 text-white shadow-sm">30 días</button>
-      <button data-periodo="estemes" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Este mes</button>
-      <button data-periodo="mesanterior" class="periodo-btn px-3 py-1.5 text-xs font-semibold rounded-full transition-colors bg-white text-slate-600 border border-slate-200 hover:bg-slate-50">Mes anterior</button>
+    <div class="pills" id="filtros">
+      <button data-periodo="hoy" class="pill">Hoy</button>
+      <button data-periodo="ayer" class="pill">Ayer</button>
+      <button data-periodo="7dias" class="pill">7 días</button>
+      <button data-periodo="15dias" class="pill">15 días</button>
+      <button data-periodo="30dias" class="pill active">30 días</button>
+      <button data-periodo="estemes" class="pill">Este mes</button>
+      <button data-periodo="mesanterior" class="pill">Mes anterior</button>
     </div>
 
-    <div id="loading" class="flex items-center justify-center h-48 text-slate-400 gap-3">
-      <div class="w-5 h-5 border-2 border-slate-200 border-t-indigo-500 rounded-full spin"></div>
-      Cargando...
-    </div>
+    <div id="loading" class="loading-wrap"><div class="loading-dot"></div>Cargando dashboard...</div>
 
     <div id="contenido" class="hidden">
 
-      <!-- KPIs -->
-      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Ventas del período</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-semibold text-slate-500 uppercase">Pedidos</span>
-            <span>🛒</span>
-          </div>
-          <div id="kpiPedidos" class="text-3xl font-bold text-slate-900">—</div>
-          <div id="kpiPedidosPrev" class="text-xs text-slate-400 mt-1"></div>
+      <div class="section-eyebrow">Resumen del período</div>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Facturación<span>💰</span></div>
+          <div class="kpi-value tabular" id="kpiFacturacion">—</div>
+          <div class="kpi-delta" id="kpiFacturacionDelta"></div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-semibold text-slate-500 uppercase">Unidades vendidas</span>
-            <span>📦</span>
-          </div>
-          <div id="kpiUnidades" class="text-3xl font-bold text-slate-900">—</div>
+        <div class="kpi-card">
+          <div class="kpi-label">Pedidos<span>🧾</span></div>
+          <div class="kpi-value tabular" id="kpiPedidos">—</div>
+          <div class="kpi-delta" id="kpiPedidosDelta"></div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-semibold text-slate-500 uppercase">Productos vendidos</span>
-            <span>🏷️</span>
-          </div>
-          <div id="kpiProductos" class="text-3xl font-bold text-slate-900">—</div>
+        <div class="kpi-card">
+          <div class="kpi-label">Ticket promedio<span>🏷️</span></div>
+          <div class="kpi-value tabular" id="kpiTicket">—</div>
+          <div class="kpi-delta"></div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="flex items-center justify-between mb-3">
-            <span class="text-xs font-semibold text-slate-500 uppercase">Sin ventas</span>
-            <span>📭</span>
-          </div>
-          <div id="kpiSinVentas" class="text-3xl font-bold text-slate-900">—</div>
+        <div class="kpi-card">
+          <div class="kpi-label">Unidades vendidas<span>📦</span></div>
+          <div class="kpi-value tabular" id="kpiUnidades">—</div>
+          <div class="kpi-delta"></div>
         </div>
       </div>
 
-      <!-- Listas -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="font-semibold text-slate-800 mb-3">🏆 Más vendidos</div>
-          <div id="listaMasVendidos" class="space-y-2 text-sm"></div>
+      <div class="panel-grid">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">🏆 Más vendidos</div>
+            <div class="seg" id="segMasVendidos">
+              <button data-crit="unidades" class="active">Unidades</button>
+              <button data-crit="facturacion">Facturación</button>
+            </div>
+          </div>
+          <div id="listaMasVendidos"></div>
         </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="font-semibold text-slate-800 mb-3">⚠️ Últimas unidades</div>
-          <div id="listaUltimasUnidades" class="space-y-2 text-sm"></div>
-        </div>
-        <div class="bg-white rounded-xl border border-slate-200 p-5">
-          <div class="font-semibold text-slate-800 mb-3">📭 Sin ventas recientes</div>
-          <div id="listaSinVentas" class="space-y-2 text-sm"></div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">⚠️ Últimas unidades</div>
+          </div>
+          <div id="listaUltimasUnidades"></div>
         </div>
       </div>
 
-      <!-- Stock general -->
-      <div class="bg-white rounded-xl border border-slate-200 p-5">
-        <div class="font-semibold text-slate-800 mb-3">📦 Stock general</div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-sm">
-            <thead>
-              <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100">
-                <th class="py-2 pr-3">Producto</th>
-                <th class="py-2 pr-3">Variante</th>
-                <th class="py-2 pr-3">SKU</th>
-                <th class="py-2 pr-3 text-right">Stock</th>
-              </tr>
-            </thead>
-            <tbody id="tablaStock"></tbody>
-          </table>
+      <div class="panel" style="margin-bottom:20px;">
+        <div class="panel-head">
+          <div class="panel-title">📭 Sin ventas recientes</div>
         </div>
+        <div id="listaSinVentas"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">📦 Stock por producto</div>
+        </div>
+        <div class="stock-toolbar">
+          <input type="text" id="buscarStock" class="search-input" placeholder="Buscar producto..." />
+          <div class="seg" id="segStock">
+            <button data-crit="stockAsc" class="active">Menor stock</button>
+            <button data-crit="nombre">A–Z</button>
+          </div>
+        </div>
+        <div id="tablaStock"></div>
       </div>
 
     </div>
@@ -136,13 +287,8 @@
 </div>
 
 <script>
-  // ---------------------------------------------------------------
-  // Config de Firebase — SOLO lectura desde acá. Las reglas de la
-  // Realtime Database deben permitir "read" público (o autenticado)
-  // en /dashboard y bloquear "write" excepto desde la GitHub Action.
-  // ---------------------------------------------------------------
   const firebaseConfig = {
-    apiKey: "AIzaSyC7261jdW9a1UFdWVlibj3fwxeMmHCjaN4",
+    apiKey: "TU_API_KEY",
     databaseURL: "https://bynina-c1eec-default-rtdb.firebaseio.com",
     projectId: "bynina-c1eec",
   };
@@ -152,8 +298,19 @@
 
   let dashboardData = null;
   let periodoActual = "30dias";
+  let criterioMasVendidos = "unidades";
+  let criterioStock = "stockAsc";
+  let filtroStock = "";
 
-  const fmtNum = (n) => (n === null || n === undefined ? "—" : Number(n).toLocaleString("es-AR"));
+  const fmtNum = (n) => (n === null || n === undefined ? "—" : Math.round(Number(n)).toLocaleString("es-AR"));
+  const fmtMoney = (n) => (n === null || n === undefined ? "—" : "$" + Math.round(Number(n)).toLocaleString("es-AR"));
+
+  function deltaHtml(actual, anterior) {
+    if (anterior === undefined || anterior === null || anterior === 0) return "";
+    const pct = ((actual - anterior) / anterior) * 100;
+    const up = pct >= 0;
+    return `<span class="kpi-delta ${up ? "up" : "down"}">${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs período anterior</span>`;
+  }
 
   function render() {
     if (!dashboardData) return;
@@ -162,83 +319,101 @@
     document.getElementById("contenido").classList.remove("hidden");
 
     const actualizado = new Date(dashboardData.actualizado);
-    document.getElementById("ultimaActualizacion").textContent =
-      "Actualizado: " + actualizado.toLocaleString("es-AR");
+    document.getElementById("ultimaActualizacion").innerHTML =
+      '<span class="dot"></span>Actualizado ' + actualizado.toLocaleString("es-AR");
 
     const kpis = (dashboardData.kpisPorPeriodo || {})[periodoActual] || {};
-    document.getElementById("kpiPedidos").textContent = fmtNum(kpis.pedidos);
-    document.getElementById("kpiPedidosPrev").textContent =
-      kpis.pedidosAnterior !== undefined ? `vs ${fmtNum(kpis.pedidosAnterior)} anterior` : "";
-    document.getElementById("kpiUnidades").textContent = fmtNum(kpis.unidadesVendidas);
-    document.getElementById("kpiProductos").textContent = fmtNum(kpis.productosVendidos);
-    document.getElementById("kpiSinVentas").textContent = fmtNum(
-      dashboardData.sinVentas ? dashboardData.sinVentas.total : null
-    );
 
-    // Más vendidos
-    const masVendidos = (dashboardData.masVendidosPorPeriodo || {})[periodoActual] || [];
+    document.getElementById("kpiFacturacion").textContent = fmtMoney(kpis.facturacionTotal);
+    document.getElementById("kpiFacturacionDelta").outerHTML = deltaHtml(kpis.facturacionTotal, kpis.facturacionAnterior) || '<div class="kpi-delta"></div>';
+
+    document.getElementById("kpiPedidos").textContent = fmtNum(kpis.pedidos);
+    document.getElementById("kpiPedidosDelta").outerHTML = deltaHtml(kpis.pedidos, kpis.pedidosAnterior) || '<div class="kpi-delta"></div>';
+
+    document.getElementById("kpiTicket").textContent = fmtMoney(kpis.ticketPromedio);
+    document.getElementById("kpiUnidades").textContent = fmtNum(kpis.unidadesVendidas);
+
+    // Más vendidos (ordenable localmente)
+    const masVendidos = [...((dashboardData.masVendidosPorPeriodo || {})[periodoActual] || [])];
+    masVendidos.sort((a, b) => (b[criterioMasVendidos] || 0) - (a[criterioMasVendidos] || 0));
+    const top10 = masVendidos.slice(0, 10);
     const elMasVendidos = document.getElementById("listaMasVendidos");
-    elMasVendidos.innerHTML = masVendidos.length
-      ? masVendidos
-          .map(
-            (p, i) => `
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-slate-500 w-4">${i + 1}</span>
-          <span class="flex-1 truncate">${p.producto}</span>
-          <span class="font-semibold text-indigo-600 shrink-0">${fmtNum(p.unidades)} u.</span>
-        </div>`
-          )
-          .join("")
-      : '<div class="text-slate-400 text-sm">Sin datos para este período.</div>';
+    elMasVendidos.innerHTML = top10.length
+      ? top10.map((p, i) => `
+        <div class="rank-row">
+          <div class="rank-num">${i + 1}</div>
+          <div class="rank-name">${p.producto}</div>
+          <div class="rank-value">${criterioMasVendidos === "facturacion" ? fmtMoney(p.facturacion) : fmtNum(p.unidades) + " u."}</div>
+        </div>`).join("")
+      : '<div class="empty-note">Sin datos para este período.</div>';
 
     // Últimas unidades
     const ultimas = dashboardData.ultimasUnidades || [];
     const elUltimas = document.getElementById("listaUltimasUnidades");
     elUltimas.innerHTML = ultimas.length
-      ? ultimas
-          .slice(0, 10)
-          .map(
-            (p) => `
-        <div class="flex items-center justify-between gap-2">
-          <span class="flex-1 truncate">${p.producto}${p.variante ? " · " + p.variante : ""}</span>
-          <span class="font-semibold text-amber-600 shrink-0">${fmtNum(p.unidades)} u.</span>
-        </div>`
-          )
-          .join("")
-      : '<div class="text-slate-400 text-sm">Sin alertas de stock bajo.</div>';
+      ? ultimas.slice(0, 10).map((p) => `
+        <div class="alert-row">
+          <div class="alert-name">${p.producto}${p.variante ? " · " + p.variante : ""}</div>
+          <div class="alert-badge">${fmtNum(p.unidades)} u.</div>
+        </div>`).join("")
+      : '<div class="empty-note">Sin alertas de stock bajo.</div>';
 
     // Sin ventas recientes
     const sinVentas = (dashboardData.sinVentas && dashboardData.sinVentas.recientes) || [];
     const elSinVentas = document.getElementById("listaSinVentas");
     elSinVentas.innerHTML = sinVentas.length
-      ? sinVentas
-          .slice(0, 10)
-          .map(
-            (p) => `
-        <div class="flex items-center justify-between gap-2">
-          <span class="flex-1 truncate">${p.producto}</span>
-          <span class="text-slate-400 shrink-0">${p.dias === null ? "sin ventas" : p.dias + "d"}</span>
-        </div>`
-          )
-          .join("")
-      : '<div class="text-slate-400 text-sm">Todo con ventas recientes.</div>';
+      ? sinVentas.slice(0, 12).map((p) => `
+        <div class="alert-row">
+          <div class="alert-name">${p.producto}</div>
+          <div class="alert-badge empty">${p.dias === null ? "sin ventas" : p.dias + "d"}</div>
+        </div>`).join("")
+      : '<div class="empty-note">Todo con ventas recientes.</div>';
 
-    // Stock general (tabla)
-    const stock = dashboardData.stockGeneral || [];
-    const tbody = document.getElementById("tablaStock");
-    tbody.innerHTML = stock
-      .slice(0, 100)
-      .map(
-        (s) => `
-      <tr class="border-b border-slate-50">
-        <td class="py-2 pr-3">${s.producto}</td>
-        <td class="py-2 pr-3 text-slate-500">${s.variante || "—"}</td>
-        <td class="py-2 pr-3 text-slate-400">${s.sku || "—"}</td>
-        <td class="py-2 pr-3 text-right font-semibold ${s.stock <= 8 ? "text-amber-600" : "text-slate-700"}">${fmtNum(s.stock)}</td>
-      </tr>`
-      )
-      .join("");
+    renderStock();
   }
+
+  function renderStock() {
+    let productos = [...(dashboardData.stockPorProducto || [])];
+
+    if (filtroStock.trim()) {
+      const q = filtroStock.trim().toLowerCase();
+      productos = productos.filter((p) => p.producto.toLowerCase().includes(q));
+    }
+
+    if (criterioStock === "nombre") {
+      productos.sort((a, b) => a.producto.localeCompare(b.producto, "es"));
+    } else {
+      productos.sort((a, b) => a.stockTotal - b.stockTotal);
+    }
+
+    const cont = document.getElementById("tablaStock");
+    if (!productos.length) {
+      cont.innerHTML = '<div class="empty-note">No se encontraron productos.</div>';
+      return;
+    }
+
+    cont.innerHTML = productos.slice(0, 150).map((p, idx) => `
+      <div class="prod-row" data-idx="${idx}">
+        <div class="prod-head" onclick="toggleProducto(${idx})">
+          <div class="chevron"></div>
+          <img class="prod-thumb" src="${p.imagen || ""}" onerror="this.style.visibility='hidden'" />
+          <div class="prod-name">${p.producto}</div>
+          <div class="prod-stock ${p.stockTotal <= 8 ? "low" : ""} tabular">${fmtNum(p.stockTotal)} u.</div>
+        </div>
+        <div class="variantes">
+          ${p.variantes.map((v) => `
+            <div class="variante-row">
+              <span>${v.variante}${v.sku ? " · " + v.sku : ""}</span>
+              <span class="variante-stock ${(v.stock || 0) <= 8 ? "low" : ""} tabular">${fmtNum(v.stock)} u.</span>
+            </div>`).join("")}
+        </div>
+      </div>`).join("");
+  }
+
+  window.toggleProducto = function (idx) {
+    const row = document.querySelector(`.prod-row[data-idx="${idx}"]`);
+    if (row) row.classList.toggle("open");
+  };
 
   function cargarDatos() {
     db.ref("dashboard").on(
@@ -249,39 +424,55 @@
       },
       (err) => {
         document.getElementById("loading").innerHTML =
-          '<div class="text-red-500 text-sm">Error cargando datos: ' + err.message + "</div>";
+          '<div style="color:var(--amber);">Error cargando datos: ' + err.message + "</div>";
       }
     );
   }
 
-  document.querySelectorAll(".periodo-btn").forEach((btn) => {
+  document.querySelectorAll(".pill").forEach((btn) => {
     btn.addEventListener("click", () => {
       periodoActual = btn.dataset.periodo;
-      document.querySelectorAll(".periodo-btn").forEach((b) => {
-        b.classList.remove("bg-indigo-600", "text-white", "shadow-sm");
-        b.classList.add("bg-white", "text-slate-600", "border", "border-slate-200");
-      });
-      btn.classList.remove("bg-white", "text-slate-600", "border", "border-slate-200");
-      btn.classList.add("bg-indigo-600", "text-white", "shadow-sm");
+      document.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
       render();
     });
   });
 
-  // El botón "Actualizar ahora" dispara la GitHub Action vía workflow_dispatch.
-  // Requiere un token de GitHub con permiso mínimo "Actions: write" guardado
-  // de forma segura (ver README) — si no está configurado, el botón solo
-  // vuelve a leer lo último que haya en Firebase.
+  document.querySelectorAll("#segMasVendidos button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      criterioMasVendidos = btn.dataset.crit;
+      document.querySelectorAll("#segMasVendidos button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      render();
+    });
+  });
+
+  document.querySelectorAll("#segStock button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      criterioStock = btn.dataset.crit;
+      document.querySelectorAll("#segStock button").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      renderStock();
+    });
+  });
+
+  document.getElementById("buscarStock").addEventListener("input", (e) => {
+    filtroStock = e.target.value;
+    renderStock();
+  });
+
   document.getElementById("btnActualizar").addEventListener("click", async () => {
     const btn = document.getElementById("btnActualizar");
     const icon = document.getElementById("iconRefresh");
     btn.disabled = true;
-    icon.classList.add("spin");
-    // Placeholder: la llamada real a la GitHub Action se agrega en el
-    // paso de configuración final (ver README del repo).
+    const original = icon.textContent;
+    icon.textContent = "Actualizando…";
+    // Placeholder: conectar con GitHub Actions workflow_dispatch es un paso
+    // opcional aparte (requiere token). Por ahora, vuelve a leer Firebase.
     setTimeout(() => {
       btn.disabled = false;
-      icon.classList.remove("spin");
-    }, 1500);
+      icon.textContent = original;
+    }, 1200);
   });
 
   cargarDatos();
