@@ -228,8 +228,7 @@
           <div class="kpi-label">Pedidos<span>🧾</span></div>
           <div class="kpi-value tabular" id="kpiPedidos">—</div>
           <div class="kpi-delta" id="kpiPedidosDelta"></div>
-        </div>
-        <div class="kpi-card">
+        </div>        <div class="kpi-card">
           <div class="kpi-label">Ticket promedio<span>🏷️</span></div>
           <div class="kpi-value tabular" id="kpiTicket">—</div>
           <div class="kpi-delta"></div>
@@ -261,11 +260,36 @@
         </div>
       </div>
 
-      <div class="panel" style="margin-bottom:20px;">
-        <div class="panel-head">
-          <div class="panel-title">📭 Sin ventas recientes</div>
+      <div class="panel-grid">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">🗂️ Más vendido por categoría</div>
+          </div>
+          <div id="listaCategorias"></div>
         </div>
-        <div id="listaSinVentas"></div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">📐 Más vendido por talle</div>
+          </div>
+          <div id="listaTalles"></div>
+        </div>
+      </div>
+
+      <div class="panel-grid">
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">✨ Nuevos ingresos (últimos 15 días)</div>
+          </div>
+          <div id="listaNuevos"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">📭 Sin ventas hace +15 días — candidatos a liquidar</div>
+          </div>
+          <div id="listaSinVentas"></div>
+        </div>
       </div>
 
       <div class="panel">
@@ -306,10 +330,18 @@
   const fmtMoney = (n) => (n === null || n === undefined ? "—" : "$" + Math.round(Number(n)).toLocaleString("es-AR"));
 
   function deltaHtml(actual, anterior) {
-    if (anterior === undefined || anterior === null || anterior === 0) return "";
+    if (anterior === undefined || anterior === null || anterior === 0) return { html: "", cls: "" };
     const pct = ((actual - anterior) / anterior) * 100;
     const up = pct >= 0;
-    return `<span class="kpi-delta ${up ? "up" : "down"}">${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs período anterior</span>`;
+    return { html: `${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs período anterior`, cls: up ? "up" : "down" };
+  }
+
+  function setDelta(id, actual, anterior) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const { html, cls } = deltaHtml(actual, anterior);
+    el.textContent = html;
+    el.className = "kpi-delta" + (cls ? " " + cls : "");
   }
 
   function render() {
@@ -325,10 +357,10 @@
     const kpis = (dashboardData.kpisPorPeriodo || {})[periodoActual] || {};
 
     document.getElementById("kpiFacturacion").textContent = fmtMoney(kpis.facturacionTotal);
-    document.getElementById("kpiFacturacionDelta").outerHTML = deltaHtml(kpis.facturacionTotal, kpis.facturacionAnterior) || '<div class="kpi-delta"></div>';
+    setDelta("kpiFacturacionDelta", kpis.facturacionTotal, kpis.facturacionAnterior);
 
     document.getElementById("kpiPedidos").textContent = fmtNum(kpis.pedidos);
-    document.getElementById("kpiPedidosDelta").outerHTML = deltaHtml(kpis.pedidos, kpis.pedidosAnterior) || '<div class="kpi-delta"></div>';
+    setDelta("kpiPedidosDelta", kpis.pedidos, kpis.pedidosAnterior);
 
     document.getElementById("kpiTicket").textContent = fmtMoney(kpis.ticketPromedio);
     document.getElementById("kpiUnidades").textContent = fmtNum(kpis.unidadesVendidas);
@@ -347,18 +379,56 @@
         </div>`).join("")
       : '<div class="empty-note">Sin datos para este período.</div>';
 
-    // Últimas unidades
-    const ultimas = dashboardData.ultimasUnidades || [];
+    // Últimas unidades — agrupado por artículo, no por variante
+    const ultimas = dashboardData.ultimasUnidadesPorArticulo || [];
     const elUltimas = document.getElementById("listaUltimasUnidades");
     elUltimas.innerHTML = ultimas.length
       ? ultimas.slice(0, 10).map((p) => `
-        <div class="alert-row">
-          <div class="alert-name">${p.producto}${p.variante ? " · " + p.variante : ""}</div>
-          <div class="alert-badge">${fmtNum(p.unidades)} u.</div>
+        <div class="alert-row" style="align-items:flex-start;">
+          <div class="alert-name">
+            <div>${p.producto}</div>
+            <div style="font-size:11px; color:var(--ink-soft); margin-top:2px;">${p.variantes}</div>
+          </div>
+          <div class="alert-badge">${fmtNum(p.unidadesBajas)} u.</div>
         </div>`).join("")
       : '<div class="empty-note">Sin alertas de stock bajo.</div>';
 
-    // Sin ventas recientes
+    // Por categoría
+    const categorias = (dashboardData.porCategoriaPorPeriodo || {})[periodoActual] || [];
+    const elCategorias = document.getElementById("listaCategorias");
+    elCategorias.innerHTML = categorias.length
+      ? categorias.map((c, i) => `
+        <div class="rank-row">
+          <div class="rank-num">${i + 1}</div>
+          <div class="rank-name">${c.categoria}</div>
+          <div class="rank-value">${fmtNum(c.unidades)} u.</div>
+        </div>`).join("")
+      : '<div class="empty-note">Sin datos para este período.</div>';
+
+    // Por talle
+    const talles = (dashboardData.porTallePorPeriodo || {})[periodoActual] || [];
+    const elTalles = document.getElementById("listaTalles");
+    elTalles.innerHTML = talles.length
+      ? talles.map((t, i) => `
+        <div class="rank-row">
+          <div class="rank-num">${i + 1}</div>
+          <div class="rank-name">${t.talle}</div>
+          <div class="rank-value">${fmtNum(t.unidades)} u.</div>
+        </div>`).join("")
+      : '<div class="empty-note">Sin datos para este período.</div>';
+
+    // Nuevos ingresos
+    const nuevos = dashboardData.nuevosIngresos || [];
+    const elNuevos = document.getElementById("listaNuevos");
+    elNuevos.innerHTML = nuevos.length
+      ? nuevos.slice(0, 10).map((p) => `
+        <div class="alert-row">
+          <div class="alert-name">${p.producto}</div>
+          <div class="alert-badge empty">${new Date(p.fecha).toLocaleDateString("es-AR")}</div>
+        </div>`).join("")
+      : '<div class="empty-note">Sin ingresos nuevos en los últimos 15 días.</div>';
+
+    // Sin ventas recientes (candidatos a liquidar)
     const sinVentas = (dashboardData.sinVentas && dashboardData.sinVentas.recientes) || [];
     const elSinVentas = document.getElementById("listaSinVentas");
     elSinVentas.innerHTML = sinVentas.length
