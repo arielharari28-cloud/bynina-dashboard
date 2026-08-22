@@ -4,311 +4,244 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>byNINA — Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=Inter:wght@400;500;600;700&family=Fraunces:ital,opsz,wght@1,9..144,500&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#F6F2EA;
-    --paper:#FFFFFF;
-    --ink:#241E1B;
-    --ink-soft:#6B615A;
-    --line:#E7DFD1;
-    --wine:#7A2740;
-    --wine-ink:#5C1D30;
-    --wine-soft:#F3E1E4;
-    --gold:#B8892F;
-    --gold-soft:#F4E9D3;
-    --sage:#4B7357;
-    --sage-soft:#E5EDE3;
-    --amber:#B5651D;
-    --amber-soft:#F6E6D3;
-    --radius:14px;
-  }
-  *{box-sizing:border-box;}
-  body{
-    margin:0;
-    background:var(--bg);
-    color:var(--ink);
-    font-family:'Inter',sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
-  .font-display{font-family:'Bricolage Grotesque',sans-serif;}
-  .font-logo{font-family:'Fraunces',serif; font-style:italic;}
-  .tabular{font-variant-numeric:tabular-nums;}
-
-  .layout{display:flex; min-height:100vh;}
-
-  /* Sidebar */
-  .sidebar{
-    width:230px; flex-shrink:0; background:var(--ink); color:#F6F2EA;
-    display:flex; flex-direction:column; position:sticky; top:0; height:100vh;
-  }
-  .sidebar-logo{padding:28px 22px 20px; border-bottom:1px solid rgba(255,255,255,0.08);}
-  .sidebar-eyebrow{font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:rgba(246,242,234,0.45); margin-bottom:6px;}
-  .sidebar-title{font-size:22px; font-weight:500;}
-  .sidebar-nav{padding:18px 14px; flex:1;}
-  .sidebar-item{
-    display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
-    font-size:14px; font-weight:600; background:rgba(255,255,255,0.08); color:#fff;
-  }
-  .sidebar-foot{padding:16px 22px; font-size:11px; color:rgba(246,242,234,0.4); border-top:1px solid rgba(255,255,255,0.08);}
-
-  main{flex:1; min-width:0; padding:28px 32px 60px; max-width:1280px; margin:0 auto;}
-
-  /* Header */
-  .header-row{display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:22px;}
-  .updated{font-size:12px; color:var(--ink-soft); margin-top:4px;}
-  .updated .dot{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--sage); margin-right:6px;}
-
-  /* Tag-shaped button, like a clothing swing tag */
-  .tag-btn{
-    position:relative; display:inline-flex; align-items:center; gap:8px;
-    padding:9px 16px 9px 22px; background:var(--wine); color:#fff; border:none;
-    font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer;
-    border-radius:3px 10px 10px 3px; transition:background .15s ease;
-  }
-  .tag-btn:hover{background:var(--wine-ink);}
-  .tag-btn:disabled{opacity:.55; cursor:default;}
-  .tag-btn::before{
-    content:''; position:absolute; left:8px; top:50%; transform:translateY(-50%);
-    width:6px; height:6px; border-radius:50%; background:var(--bg);
-  }
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
   .spin{animation:spin 1s linear infinite;}
   @keyframes spin{to{transform:rotate(360deg);}}
-
-  /* Period pills */
-  .pills{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:26px;}
-  .pill{
-    padding:7px 15px; border-radius:999px; font-size:12.5px; font-weight:600;
-    background:var(--paper); color:var(--ink-soft); border:1px solid var(--line); cursor:pointer;
-    transition:all .12s ease;
-  }
-  .pill:hover{border-color:var(--wine); color:var(--wine);}
-  .pill.active{background:var(--ink); color:#fff; border-color:var(--ink);}
-
-  .section-eyebrow{
-    font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase;
-    color:var(--ink-soft); margin:0 0 10px 2px;
-  }
-
-  /* KPI cards */
-  .kpi-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:28px;}
-  @media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr);}}
-  .kpi-card{
-    background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
-    padding:18px 18px 16px; position:relative; overflow:hidden;
-  }
-  .kpi-card::after{
-    content:''; position:absolute; right:-18px; top:-18px; width:64px; height:64px;
-    border-radius:50%; background:var(--accent-tint,var(--wine-soft)); opacity:.6;
-  }
-  .kpi-label{font-size:12px; font-weight:600; color:var(--ink-soft); display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; position:relative;}
-  .kpi-value{font-family:'Bricolage Grotesque',sans-serif; font-size:30px; font-weight:700; line-height:1; position:relative;}
-  .kpi-delta{font-size:12px; margin-top:8px; font-weight:600; position:relative;}
-  .kpi-delta.up{color:var(--sage);}
-  .kpi-delta.down{color:var(--amber);}
-
-  /* Panels */
-  .panel-grid{display:grid; grid-template-columns:1.1fr .9fr; gap:16px; margin-bottom:20px;}
-  @media(max-width:900px){.panel-grid{grid-template-columns:1fr;}}
-  .panel{background:var(--paper); border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px;}
-  .panel-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;}
-  .panel-title{font-family:'Bricolage Grotesque',sans-serif; font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px;}
-
-  .seg{display:flex; background:var(--bg); border-radius:8px; padding:3px; gap:2px;}
-  .seg button{
-    border:none; background:transparent; font-size:11.5px; font-weight:700; padding:5px 10px;
-    border-radius:6px; cursor:pointer; color:var(--ink-soft);
-  }
-  .seg button.active{background:var(--paper); color:var(--wine); box-shadow:0 1px 2px rgba(0,0,0,.08);}
-
-  .rank-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);}
-  .rank-row:last-child{border-bottom:none;}
-  .rank-num{
-    width:20px; height:20px; border-radius:50%; background:var(--wine-soft); color:var(--wine-ink);
-    font-size:10px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0;
-  }
-  .rank-name{flex:1; min-width:0; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  .rank-value{font-size:13px; font-weight:700; color:var(--wine-ink); flex-shrink:0; font-family:'Bricolage Grotesque',sans-serif;}
-
-  .alert-row{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line);}
-  .alert-row:last-child{border-bottom:none;}
-  .alert-name{flex:1; min-width:0; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  .alert-badge{
-    font-size:11px; font-weight:700; padding:3px 9px; border-radius:999px; flex-shrink:0;
-    background:var(--amber-soft); color:var(--amber);
-  }
-  .alert-badge.empty{background:var(--sage-soft); color:var(--sage);}
-
-  .empty-note{font-size:12.5px; color:var(--ink-soft); padding:6px 0;}
-
-  /* Stock table */
-  .stock-toolbar{display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap;}
-  .search-input{
-    flex:1; min-width:180px; padding:9px 14px; border:1px solid var(--line); border-radius:9px;
-    font-size:13px; font-family:'Inter',sans-serif; background:var(--bg);
-  }
-  .search-input:focus{outline:2px solid var(--wine); outline-offset:1px; background:var(--paper);}
-
-  .prod-row{border-bottom:1px solid var(--line);}
-  .prod-row:last-child{border-bottom:none;}
-  .prod-head{
-    display:flex; align-items:center; gap:12px; padding:12px 4px; cursor:pointer; user-select:none;
-  }
-  .prod-head:hover{background:var(--bg);}
-  .prod-thumb{width:38px; height:46px; border-radius:6px; object-fit:cover; background:var(--line); flex-shrink:0;}
-  .prod-name{flex:1; min-width:0; font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  .prod-stock{font-family:'Bricolage Grotesque',sans-serif; font-weight:700; font-size:14px; flex-shrink:0;}
-  .prod-stock.low{color:var(--amber);}
-  .chevron{width:9px; height:9px; border-right:2px solid var(--ink-soft); border-bottom:2px solid var(--ink-soft); transform:rotate(-45deg); transition:transform .15s ease; flex-shrink:0; margin-right:2px;}
-  .prod-row.open .chevron{transform:rotate(45deg);}
-  .variantes{display:none; padding:0 4px 12px 50px;}
-  .prod-row.open .variantes{display:block;}
-  .variante-row{display:flex; justify-content:space-between; padding:5px 0; font-size:12.5px; color:var(--ink-soft); border-bottom:1px dashed var(--line);}
-  .variante-row:last-child{border-bottom:none;}
-  .variante-stock{font-weight:700; font-family:'Bricolage Grotesque',sans-serif;}
-  .variante-stock.low{color:var(--amber);}
-
-  .th-sort{cursor:pointer; user-select:none;}
-  .th-sort:hover{color:var(--wine);}
-  .loading-wrap{display:flex; align-items:center; gap:10px; color:var(--ink-soft); padding:60px 0; font-size:14px; justify-content:center;}
-  .loading-dot{width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--wine); border-radius:50%; animation:spin 1s linear infinite;}
-  .hidden{display:none !important;}
+  .pill{padding:.4rem .85rem;font-size:.75rem;font-weight:600;border-radius:9999px;background:#fff;color:#475569;border:1px solid #e2e8f0;cursor:pointer;white-space:nowrap;}
+  .pill:hover{background:#f8fafc;}
+  .pill.active{background:#4f46e5;color:#fff;border-color:#4f46e5;}
+  .navitem{display:flex;align-items:center;gap:.6rem;padding:.6rem .7rem;border-radius:.6rem;font-size:.9rem;font-weight:600;color:#475569;cursor:pointer;}
+  .navitem:hover{background:#f8fafc;}
+  .navitem.active{background:#eef2ff;color:#4338ca;}
+  .card{background:#fff;border:1px solid #e2e8f0;border-radius:.9rem;}
+  .chip{font-size:.7rem;font-weight:600;padding:.2rem .55rem;border-radius:9999px;}
+  .chip-low{background:#fee2e2;color:#b91c1c;}
+  .chip-ok{background:#f1f5f9;color:#475569;}
+  .chip-green{background:#dcfce7;color:#15803d;}
+  .chip-amber{background:#fef3c7;color:#92400e;}
+  .view{display:none;}
+  .view.active{display:block;}
 </style>
 </head>
-<body>
+<body class="h-full flex bg-slate-50 min-h-screen">
 
-<div class="layout">
-  <aside class="sidebar">
-    <div class="sidebar-logo">
-      <div class="sidebar-eyebrow">byNINA</div>
-      <div class="sidebar-title font-logo">Dashboard</div>
+<aside class="hidden md:flex w-[230px] shrink-0 bg-white border-r border-slate-200 flex-col h-screen sticky top-0">
+  <div class="px-5 py-5 border-b border-slate-100">
+    <div class="text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1">byNINA</div>
+    <div class="text-lg font-bold text-slate-800 leading-tight">Dashboard</div>
+  </div>
+  <nav class="flex-1 py-4 px-2 space-y-0.5" id="sidebarNav">
+    <div class="navitem active" data-view="dashboard">📊 Dashboard</div>
+    <div class="navitem" data-view="stock">📦 Stock general</div>
+    <div class="navitem" data-view="ultimas">⚠️ Últimas unidades</div>
+    <div class="navitem" data-view="vendidos">🏆 Productos vendidos</div>
+    <div class="navitem" data-view="nuevos">✨ Productos nuevos</div>
+    <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
+  </nav>
+  <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">Datos vía Tienda Nube</div>
+</aside>
+
+<main class="flex-1 min-w-0 p-4 md:p-6 max-w-[1100px] mx-auto">
+
+  <div id="loading" class="flex items-center justify-center h-48 text-slate-400 gap-3">
+    <div class="w-5 h-5 border-2 border-slate-200 border-t-indigo-500 rounded-full spin"></div>Cargando dashboard...
+  </div>
+
+  <div id="app" class="hidden">
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <div class="view active" data-view="dashboard">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
+          <p id="ultimaActualizacion" class="text-xs text-slate-400 mt-0.5">Cargando...</p>
+        </div>
+        <button id="btnActualizar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2">🔄 Actualizar ahora</button>
+      </div>
+
+      <div class="flex flex-wrap gap-1.5 mb-5" id="pillsPeriodoDash"></div>
+
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Ventas del período</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">💰 Facturación</div><div class="text-2xl font-bold" id="kFacturacion">—</div><div class="text-xs mt-1" id="kFacturacionDelta"></div></div>
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">🛒 Pedidos</div><div class="text-2xl font-bold" id="kPedidos">—</div><div class="text-xs mt-1" id="kPedidosDelta"></div></div>
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">🏷️ Ticket promedio</div><div class="text-2xl font-bold" id="kTicket">—</div></div>
+        <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">📦 Unidades vendidas</div><div class="text-2xl font-bold" id="kUnidades">—</div></div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">🏆 Más vendidos</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="vendidos">Ver más →</div></div>
+          <div id="miniMasVendidos" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">⚠️ Últimas unidades</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="ultimas">Ver más →</div></div>
+          <div id="miniUltimas" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">📭 Sin ventas</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="sinventas">Ver más →</div></div>
+          <div id="miniSinVentas" class="space-y-2 text-sm"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="card p-5">
+          <div class="font-bold text-sm mb-3">🗂️ Por categoría</div>
+          <div id="miniCategorias" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="font-bold text-sm mb-3">📐 Por talle</div>
+          <div id="miniTalles" class="space-y-2 text-sm"></div>
+        </div>
+      </div>
     </div>
-    <nav class="sidebar-nav">
-      <div class="sidebar-item">📊 Ventas &amp; stock</div>
-    </nav>
-    <div class="sidebar-foot">Sincronizado desde Tienda Nube</div>
-  </aside>
 
-  <main>
-    <div class="header-row">
-      <div>
-        <div class="font-display" style="font-size:22px; font-weight:700;">Panel general</div>
-        <div class="updated" id="ultimaActualizacion"><span class="dot"></span>Cargando datos...</div>
+    <!-- ===================== STOCK GENERAL ===================== -->
+    <div class="view" data-view="stock">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📦 Stock general</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="stockCount"></p>
+
+      <input type="search" id="stockBuscar" placeholder="Buscar por nombre..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <span class="text-xs text-slate-500 font-medium">Ordenar:</span>
+        <div class="flex flex-wrap gap-1.5" id="stockOrden">
+          <button class="pill active" data-crit="nombre">Nombre (A-Z)</button>
+          <button class="pill" data-crit="mayorStock">Mayor stock</button>
+          <button class="pill" data-crit="menorStock">Menor stock</button>
+          <button class="pill" data-crit="masVendidos">Más vendidos</button>
+          <button class="pill" data-crit="masRecientes">Más recientes</button>
+          <button class="pill" data-crit="masAntiguos">Más antiguos</button>
+        </div>
       </div>
-      <button id="btnActualizar" class="tag-btn">
-        <span id="iconRefresh">Actualizar</span>
-      </button>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <span class="text-xs text-slate-500 font-medium">Stock:</span>
+        <input type="number" min="0" id="stockMin" placeholder="Mín" class="w-20 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+        <span class="text-xs text-slate-400">—</span>
+        <input type="number" min="0" id="stockMax" placeholder="Máx" class="w-20 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+        <select id="stockCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm ml-2"><option value="">Todas las categorías</option></select>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-5">
+        <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
+          <input type="checkbox" id="stockOcultos" class="rounded border-slate-300 text-indigo-600" />Ver ocultos
+        </label>
+      </div>
+
+      <div id="stockLista" class="space-y-3"></div>
     </div>
 
-    <div class="pills" id="filtros">
-      <button data-periodo="hoy" class="pill">Hoy</button>
-      <button data-periodo="ayer" class="pill">Ayer</button>
-      <button data-periodo="7dias" class="pill">7 días</button>
-      <button data-periodo="15dias" class="pill">15 días</button>
-      <button data-periodo="30dias" class="pill active">30 días</button>
-      <button data-periodo="estemes" class="pill">Este mes</button>
-      <button data-periodo="mesanterior" class="pill">Mes anterior</button>
+    <!-- ===================== ÚLTIMAS UNIDADES ===================== -->
+    <div class="view" data-view="ultimas">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">⚠️ Últimas unidades</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Ordenados por días hasta agotarse según el ritmo de ventas del período elegido.</p>
+
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoUltimas"></div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <select id="ultimasCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
+        <input type="search" id="ultimasBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+      </div>
+
+      <div class="flex flex-wrap gap-1.5 mb-5">
+        <button class="pill active" id="ultimasRapido">Se agotan más rápido (≤30 días)</button>
+        <button class="pill" id="ultimasTodos">Todos los productos</button>
+      </div>
+
+      <div id="ultimasLista" class="space-y-3"></div>
     </div>
 
-    <div id="loading" class="loading-wrap"><div class="loading-dot"></div>Cargando dashboard...</div>
+    <!-- ===================== PRODUCTOS VENDIDOS ===================== -->
+    <div class="view" data-view="vendidos">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏆 Productos vendidos</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="vendidosCount"></p>
 
-    <div id="contenido" class="hidden">
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoVendidos"></div>
 
-      <div class="section-eyebrow">Resumen del período</div>
-      <div class="kpi-grid">
-        <div class="kpi-card">
-          <div class="kpi-label">Facturación<span>💰</span></div>
-          <div class="kpi-value tabular" id="kpiFacturacion">—</div>
-          <div class="kpi-delta" id="kpiFacturacionDelta"></div>
+      <div class="flex flex-wrap gap-2 items-center mb-4">
+        <select id="vendidosCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
+        <div class="flex gap-1.5" id="vendidosCriterio">
+          <button class="pill active" data-crit="unidades">Por unidades</button>
+          <button class="pill" data-crit="facturacion">Por facturación</button>
         </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Pedidos<span>🧾</span></div>
-          <div class="kpi-value tabular" id="kpiPedidos">—</div>
-          <div class="kpi-delta" id="kpiPedidosDelta"></div>
-        </div>        <div class="kpi-card">
-          <div class="kpi-label">Ticket promedio<span>🏷️</span></div>
-          <div class="kpi-value tabular" id="kpiTicket">—</div>
-          <div class="kpi-delta"></div>
-        </div>
-        <div class="kpi-card">
-          <div class="kpi-label">Unidades vendidas<span>📦</span></div>
-          <div class="kpi-value tabular" id="kpiUnidades">—</div>
-          <div class="kpi-delta"></div>
-        </div>
+        <input type="search" id="vendidosBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
       </div>
 
-      <div class="panel-grid">
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">🏆 Más vendidos</div>
-            <div class="seg" id="segMasVendidos">
-              <button data-crit="unidades" class="active">Unidades</button>
-              <button data-crit="facturacion">Facturación</button>
-            </div>
-          </div>
-          <div id="listaMasVendidos"></div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">⚠️ Últimas unidades</div>
-          </div>
-          <div id="listaUltimasUnidades"></div>
-        </div>
+      <div class="card overflow-hidden">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+              <th class="py-2.5 px-4">#</th>
+              <th class="py-2.5 px-4">Producto</th>
+              <th class="py-2.5 px-4 text-right">Unidades</th>
+              <th class="py-2.5 px-4 text-right">Pedidos</th>
+              <th class="py-2.5 px-4 text-right">Última venta</th>
+            </tr>
+          </thead>
+          <tbody id="vendidosTabla"></tbody>
+        </table>
       </div>
-
-      <div class="panel-grid">
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">🗂️ Más vendido por categoría</div>
-          </div>
-          <div id="listaCategorias"></div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">📐 Más vendido por talle</div>
-          </div>
-          <div id="listaTalles"></div>
-        </div>
-      </div>
-
-      <div class="panel-grid">
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">✨ Nuevos ingresos (últimos 15 días)</div>
-          </div>
-          <div id="listaNuevos"></div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">📭 Sin ventas hace +15 días — candidatos a liquidar</div>
-          </div>
-          <div id="listaSinVentas"></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-head">
-          <div class="panel-title">📦 Stock por producto</div>
-        </div>
-        <div class="stock-toolbar">
-          <input type="text" id="buscarStock" class="search-input" placeholder="Buscar producto..." />
-          <div class="seg" id="segStock">
-            <button data-crit="stockAsc" class="active">Menor stock</button>
-            <button data-crit="nombre">A–Z</button>
-          </div>
-        </div>
-        <div id="tablaStock"></div>
-      </div>
-
     </div>
-  </main>
-</div>
+
+    <!-- ===================== PRODUCTOS NUEVOS ===================== -->
+    <div class="view" data-view="nuevos">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">✨ Productos nuevos</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="nuevosCount"></p>
+
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoNuevos"></div>
+      <input type="search" id="nuevosBuscar" placeholder="Buscar por nombre..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-5" />
+
+      <div class="mb-2 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-green-500"></span>
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wide" id="nuevosVendieronTitulo">YA VENDIERON</span>
+      </div>
+      <div id="nuevosVendieron" class="space-y-3 mb-6"></div>
+
+      <div class="mb-2 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wide" id="nuevosSinVentaTitulo">SIN VENTAS</span>
+      </div>
+      <div id="nuevosSinVenta" class="space-y-3"></div>
+    </div>
+
+    <!-- ===================== SIN VENTAS ===================== -->
+    <div class="view" data-view="sinventas">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📭 Sin ventas</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4" id="sinventasCount"></p>
+
+      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoSinVentas"></div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-3">
+        <select id="sinventasCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
+        <div class="flex gap-1.5" id="sinventasStockFiltro">
+          <button class="pill active" data-crit="conStock">Con stock</button>
+          <button class="pill" data-crit="todos">Todos</button>
+          <button class="pill" data-crit="sinStock">Sin stock</button>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap gap-2 items-center mb-5">
+        <span class="text-xs text-slate-500 font-medium">Ordenar:</span>
+        <div class="flex flex-wrap gap-1.5" id="sinventasOrden">
+          <button class="pill active" data-crit="masNuevos">Más nuevos</button>
+          <button class="pill" data-crit="mayorStock">Mayor stock</button>
+          <button class="pill" data-crit="menorStock">Menor stock</button>
+          <button class="pill" data-crit="sinVenderMasTiempo">Sin vender más tiempo</button>
+          <button class="pill" data-crit="nombre">Nombre</button>
+        </div>
+        <input type="search" id="sinventasBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+      </div>
+
+      <div id="sinventasLista" class="space-y-3"></div>
+    </div>
+
+  </div>
+</main>
 
 <script>
   const firebaseConfig = {
@@ -316,236 +249,346 @@
     databaseURL: "https://bynina-c1eec-default-rtdb.firebaseio.com",
     projectId: "bynina-c1eec",
   };
-
   firebase.initializeApp(firebaseConfig);
   const db = firebase.database();
 
-  let dashboardData = null;
-  let periodoActual = "30dias";
-  let criterioMasVendidos = "unidades";
-  let criterioStock = "stockAsc";
-  let filtroStock = "";
+  let data = null;
+  let periodoDash = "30dias";
+  let periodoUltimas = "30dias";
+  let periodoVendidos = "30dias";
+  let periodoNuevos = "15dias";
+  let periodoSinVentas = "30dias";
+
+  let stockOrden = "nombre", stockBuscar = "", stockMin = null, stockMax = null, stockCategoria = "", stockOcultos = false;
+  let ultimasRapido = true, ultimasCategoria = "", ultimasBuscar = "";
+  let vendidosCriterio = "unidades", vendidosCategoria = "", vendidosBuscar = "";
+  let nuevosBuscar = "";
+  let sinventasStock = "conStock", sinventasOrden = "masNuevos", sinventasCategoria = "", sinventasBuscar = "";
+
+  const PERIODOS = [
+    { key: "hoy", label: "Hoy" }, { key: "ayer", label: "Ayer" },
+    { key: "7dias", label: "7 días" }, { key: "15dias", label: "15 días" },
+    { key: "30dias", label: "30 días" }, { key: "estemes", label: "Este mes" },
+    { key: "mesanterior", label: "Mes anterior" },
+  ];
 
   const fmtNum = (n) => (n === null || n === undefined ? "—" : Math.round(Number(n)).toLocaleString("es-AR"));
   const fmtMoney = (n) => (n === null || n === undefined ? "—" : "$" + Math.round(Number(n)).toLocaleString("es-AR"));
+  const fmtFecha = (d) => (d ? new Date(d).toLocaleDateString("es-AR") : "—");
 
-  function deltaHtml(actual, anterior) {
-    if (anterior === undefined || anterior === null || anterior === 0) return { html: "", cls: "" };
-    const pct = ((actual - anterior) / anterior) * 100;
-    const up = pct >= 0;
-    return { html: `${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs período anterior`, cls: up ? "up" : "down" };
+  function pillsHtml(containerId, current, onClick) {
+    const el = document.getElementById(containerId);
+    el.innerHTML = PERIODOS.map(p => `<button class="pill ${p.key === current ? "active" : ""}" data-key="${p.key}">${p.label}</button>`).join("");
+    el.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => onClick(btn.dataset.key)));
   }
 
-  function setDelta(id, actual, anterior) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    const { html, cls } = deltaHtml(actual, anterior);
-    el.textContent = html;
-    el.className = "kpi-delta" + (cls ? " " + cls : "");
+  function categoriasUnicas() {
+    const set = new Set((data.productos || []).map(p => p.categoria || "Sin categoría"));
+    return Array.from(set).sort();
   }
 
-  function render() {
-    if (!dashboardData) return;
-
-    document.getElementById("loading").classList.add("hidden");
-    document.getElementById("contenido").classList.remove("hidden");
-
-    const actualizado = new Date(dashboardData.actualizado);
-    document.getElementById("ultimaActualizacion").innerHTML =
-      '<span class="dot"></span>Actualizado ' + actualizado.toLocaleString("es-AR");
-
-    const kpis = (dashboardData.kpisPorPeriodo || {})[periodoActual] || {};
-
-    document.getElementById("kpiFacturacion").textContent = fmtMoney(kpis.facturacionTotal);
-    setDelta("kpiFacturacionDelta", kpis.facturacionTotal, kpis.facturacionAnterior);
-
-    document.getElementById("kpiPedidos").textContent = fmtNum(kpis.pedidos);
-    setDelta("kpiPedidosDelta", kpis.pedidos, kpis.pedidosAnterior);
-
-    document.getElementById("kpiTicket").textContent = fmtMoney(kpis.ticketPromedio);
-    document.getElementById("kpiUnidades").textContent = fmtNum(kpis.unidadesVendidas);
-
-    // Más vendidos (ordenable localmente)
-    const masVendidos = [...((dashboardData.masVendidosPorPeriodo || {})[periodoActual] || [])];
-    masVendidos.sort((a, b) => (b[criterioMasVendidos] || 0) - (a[criterioMasVendidos] || 0));
-    const top10 = masVendidos.slice(0, 10);
-    const elMasVendidos = document.getElementById("listaMasVendidos");
-    elMasVendidos.innerHTML = top10.length
-      ? top10.map((p, i) => `
-        <div class="rank-row">
-          <div class="rank-num">${i + 1}</div>
-          <div class="rank-name">${p.producto}</div>
-          <div class="rank-value">${criterioMasVendidos === "facturacion" ? fmtMoney(p.facturacion) : fmtNum(p.unidades) + " u."}</div>
-        </div>`).join("")
-      : '<div class="empty-note">Sin datos para este período.</div>';
-
-    // Últimas unidades — agrupado por artículo, no por variante
-    const ultimas = dashboardData.ultimasUnidadesPorArticulo || [];
-    const elUltimas = document.getElementById("listaUltimasUnidades");
-    elUltimas.innerHTML = ultimas.length
-      ? ultimas.slice(0, 10).map((p) => `
-        <div class="alert-row" style="align-items:flex-start;">
-          <div class="alert-name">
-            <div>${p.producto}</div>
-            <div style="font-size:11px; color:var(--ink-soft); margin-top:2px;">${p.variantes}</div>
-          </div>
-          <div class="alert-badge">${fmtNum(p.unidadesBajas)} u.</div>
-        </div>`).join("")
-      : '<div class="empty-note">Sin alertas de stock bajo.</div>';
-
-    // Por categoría
-    const categorias = (dashboardData.porCategoriaPorPeriodo || {})[periodoActual] || [];
-    const elCategorias = document.getElementById("listaCategorias");
-    elCategorias.innerHTML = categorias.length
-      ? categorias.map((c, i) => `
-        <div class="rank-row">
-          <div class="rank-num">${i + 1}</div>
-          <div class="rank-name">${c.categoria}</div>
-          <div class="rank-value">${fmtNum(c.unidades)} u.</div>
-        </div>`).join("")
-      : '<div class="empty-note">Sin datos para este período.</div>';
-
-    // Por talle
-    const talles = (dashboardData.porTallePorPeriodo || {})[periodoActual] || [];
-    const elTalles = document.getElementById("listaTalles");
-    elTalles.innerHTML = talles.length
-      ? talles.map((t, i) => `
-        <div class="rank-row">
-          <div class="rank-num">${i + 1}</div>
-          <div class="rank-name">${t.talle}</div>
-          <div class="rank-value">${fmtNum(t.unidades)} u.</div>
-        </div>`).join("")
-      : '<div class="empty-note">Sin datos para este período.</div>';
-
-    // Nuevos ingresos
-    const nuevos = dashboardData.nuevosIngresos || [];
-    const elNuevos = document.getElementById("listaNuevos");
-    elNuevos.innerHTML = nuevos.length
-      ? nuevos.slice(0, 10).map((p) => `
-        <div class="alert-row">
-          <div class="alert-name">${p.producto}</div>
-          <div class="alert-badge empty">${new Date(p.fecha).toLocaleDateString("es-AR")}</div>
-        </div>`).join("")
-      : '<div class="empty-note">Sin ingresos nuevos en los últimos 15 días.</div>';
-
-    // Sin ventas recientes (candidatos a liquidar)
-    const sinVentas = (dashboardData.sinVentas && dashboardData.sinVentas.recientes) || [];
-    const elSinVentas = document.getElementById("listaSinVentas");
-    elSinVentas.innerHTML = sinVentas.length
-      ? sinVentas.slice(0, 12).map((p) => `
-        <div class="alert-row">
-          <div class="alert-name">${p.producto}</div>
-          <div class="alert-badge empty">${p.dias === null ? "sin ventas" : p.dias + "d"}</div>
-        </div>`).join("")
-      : '<div class="empty-note">Todo con ventas recientes.</div>';
-
-    renderStock();
+  function llenarSelectCategorias(id, current) {
+    const sel = document.getElementById(id);
+    const cats = categoriasUnicas();
+    sel.innerHTML = '<option value="">Todas las categorías</option>' + cats.map(c => `<option value="${c}" ${c === current ? "selected" : ""}>${c}</option>`).join("");
   }
 
+  // ---------------- Navegación ----------------
+  document.querySelectorAll(".navitem").forEach(item => {
+    item.addEventListener("click", () => irAVista(item.dataset.view));
+  });
+  document.addEventListener("click", (e) => {
+    const goto = e.target.closest("[data-goto]");
+    if (goto) irAVista(goto.dataset.goto);
+  });
+  function irAVista(view) {
+    document.querySelectorAll(".navitem").forEach(n => n.classList.toggle("active", n.dataset.view === view));
+    document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.dataset.view === view));
+    window.scrollTo(0, 0);
+  }
+
+  // ---------------- Dashboard ----------------
+  function renderDashboard() {
+    pillsHtml("pillsPeriodoDash", periodoDash, (k) => { periodoDash = k; renderDashboard(); });
+
+    const kpis = (data.kpisPorPeriodo || {})[periodoDash] || {};
+    document.getElementById("kFacturacion").textContent = fmtMoney(kpis.facturacionTotal);
+    document.getElementById("kPedidos").textContent = fmtNum(kpis.pedidos);
+    document.getElementById("kTicket").textContent = fmtMoney(kpis.ticketPromedio);
+    document.getElementById("kUnidades").textContent = fmtNum(kpis.unidadesVendidas);
+
+    function delta(id, actual, anterior) {
+      const el = document.getElementById(id);
+      if (!anterior) { el.textContent = ""; return; }
+      const pct = ((actual - anterior) / anterior) * 100;
+      const up = pct >= 0;
+      el.textContent = `${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs anterior`;
+      el.className = "text-xs mt-1 font-semibold " + (up ? "text-green-600" : "text-red-500");
+    }
+    delta("kFacturacionDelta", kpis.facturacionTotal, kpis.facturacionAnterior);
+    delta("kPedidosDelta", kpis.pedidos, kpis.pedidosAnterior);
+
+    const productos = data.productos || [];
+    const top = [...productos].sort((a, b) => (b.ventasPorPeriodo[periodoDash]?.unidades || 0) - (a.ventasPorPeriodo[periodoDash]?.unidades || 0)).slice(0, 5);
+    document.getElementById("miniMasVendidos").innerHTML = top.map((p, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${p.producto}</span><span class="font-bold text-indigo-600">${fmtNum(p.ventasPorPeriodo[periodoDash]?.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    const bajos = productos.filter(p => p.variantes.some(v => v.stock > 0 && v.stock <= 8)).slice(0, 5);
+    document.getElementById("miniUltimas").innerHTML = bajos.map(p => `
+      <div class="flex justify-between gap-2"><span class="flex-1 truncate">${p.producto}</span><span class="font-bold text-amber-600">${fmtNum(p.stockTotal)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin alertas.</div>';
+
+    const sinV = productos.filter(p => (p.ventasPorPeriodo[periodoDash]?.unidades || 0) === 0 && p.stockTotal > 0).slice(0, 5);
+    document.getElementById("miniSinVentas").innerHTML = sinV.map(p => `
+      <div class="flex justify-between gap-2"><span class="flex-1 truncate">${p.producto}</span><span class="text-slate-400 text-xs">${fmtFecha(p.ventasTotales.ultimaVenta)}</span></div>`).join("") || '<div class="text-slate-400 text-sm">Todo con ventas.</div>';
+
+    const cats = (data.porCategoriaPorPeriodo || {})[periodoDash] || [];
+    document.getElementById("miniCategorias").innerHTML = cats.slice(0, 6).map((c, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${c.categoria}</span><span class="font-bold text-indigo-600">${fmtNum(c.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    const talles = (data.porTallePorPeriodo || {})[periodoDash] || [];
+    document.getElementById("miniTalles").innerHTML = talles.slice(0, 6).map((t, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${t.talle}</span><span class="font-bold text-indigo-600">${fmtNum(t.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+  }
+
+  // ---------------- Stock general ----------------
   function renderStock() {
-    let productos = [...(dashboardData.stockPorProducto || [])];
+    let productos = [...(data.productos || [])];
+    if (!stockOcultos) productos = productos.filter(p => p.publicado);
+    if (stockCategoria) productos = productos.filter(p => p.categoria === stockCategoria);
+    if (stockBuscar.trim()) { const q = stockBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+    if (stockMin !== null) productos = productos.filter(p => p.stockTotal >= stockMin);
+    if (stockMax !== null) productos = productos.filter(p => p.stockTotal <= stockMax);
 
-    if (filtroStock.trim()) {
-      const q = filtroStock.trim().toLowerCase();
-      productos = productos.filter((p) => p.producto.toLowerCase().includes(q));
-    }
+    const sorters = {
+      nombre: (a, b) => a.producto.localeCompare(b.producto, "es"),
+      mayorStock: (a, b) => b.stockTotal - a.stockTotal,
+      menorStock: (a, b) => a.stockTotal - b.stockTotal,
+      masVendidos: (a, b) => b.ventasTotales.unidades - a.ventasTotales.unidades,
+      masRecientes: (a, b) => new Date(b.creado || 0) - new Date(a.creado || 0),
+      masAntiguos: (a, b) => new Date(a.creado || 0) - new Date(b.creado || 0),
+    };
+    productos.sort(sorters[stockOrden] || sorters.nombre);
 
-    if (criterioStock === "nombre") {
-      productos.sort((a, b) => a.producto.localeCompare(b.producto, "es"));
-    } else {
-      productos.sort((a, b) => a.stockTotal - b.stockTotal);
-    }
+    document.getElementById("stockCount").textContent = `${productos.length} productos · stock actual por color y talle`;
 
-    const cont = document.getElementById("tablaStock");
-    if (!productos.length) {
-      cont.innerHTML = '<div class="empty-note">No se encontraron productos.</div>';
-      return;
-    }
-
-    cont.innerHTML = productos.slice(0, 150).map((p, idx) => `
-      <div class="prod-row" data-idx="${idx}">
-        <div class="prod-head" onclick="toggleProducto(${idx})">
-          <div class="chevron"></div>
-          <img class="prod-thumb" src="${p.imagen || ""}" onerror="this.style.visibility='hidden'" />
-          <div class="prod-name">${p.producto}</div>
-          <div class="prod-stock ${p.stockTotal <= 8 ? "low" : ""} tabular">${fmtNum(p.stockTotal)} u.</div>
+    document.getElementById("stockLista").innerHTML = productos.slice(0, 150).map((p, idx) => {
+      const chips = p.stockPorColor.slice(0, 4).map(c => `<span class="chip ${c.stock <= 0 ? "chip-low" : "chip-ok"}">${c.color}: ${c.stock}</span>`).join(" ");
+      const extra = p.stockPorColor.length > 4 ? `<span class="text-xs text-slate-400">+${p.stockPorColor.length - 4} colores</span>` : "";
+      return `
+      <div class="card p-4 flex items-center gap-4">
+        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm mb-1.5">${p.producto}</div>
+          <div class="flex flex-wrap gap-1.5 items-center">${chips}${extra}</div>
+          <div class="text-xs text-indigo-500 font-semibold mt-1.5">${fmtNum(p.ventasTotales.unidades)} vendidos en total</div>
         </div>
-        <div class="variantes">
-          ${p.variantes.map((v) => `
-            <div class="variante-row">
-              <span>${v.variante}${v.sku ? " · " + v.sku : ""}</span>
-              <span class="variante-stock ${(v.stock || 0) <= 8 ? "low" : ""} tabular">${fmtNum(v.stock)} u.</span>
-            </div>`).join("")}
+        <div class="text-right flex-shrink-0">
+          <div class="text-xl font-bold">${fmtNum(p.stockTotal)}</div>
+          <div class="text-xs text-slate-400">unid.</div>
         </div>
-      </div>`).join("");
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm p-4">No se encontraron productos.</div>';
   }
 
-  window.toggleProducto = function (idx) {
-    const row = document.querySelector(`.prod-row[data-idx="${idx}"]`);
-    if (row) row.classList.toggle("open");
-  };
-
-  function cargarDatos() {
-    db.ref("dashboard").on(
-      "value",
-      (snap) => {
-        dashboardData = snap.val();
-        render();
-      },
-      (err) => {
-        document.getElementById("loading").innerHTML =
-          '<div style="color:var(--amber);">Error cargando datos: ' + err.message + "</div>";
-      }
-    );
+  // ---------------- Últimas unidades ----------------
+  function diasHastaAgotarse(p, periodo) {
+    const dias = (data.periodosDias || {})[periodo] || 30;
+    const vendidas = p.ventasPorPeriodo[periodo]?.unidades || 0;
+    if (vendidas === 0) return Infinity;
+    const ritmo = vendidas / dias;
+    return p.stockTotal / ritmo;
   }
 
-  document.querySelectorAll(".pill").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      periodoActual = btn.dataset.periodo;
-      document.querySelectorAll(".pill").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      render();
-    });
-  });
+  function renderUltimas() {
+    pillsHtml("pillsPeriodoUltimas", periodoUltimas, (k) => { periodoUltimas = k; renderUltimas(); });
+    llenarSelectCategorias("ultimasCategoria", ultimasCategoria);
 
-  document.querySelectorAll("#segMasVendidos button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      criterioMasVendidos = btn.dataset.crit;
-      document.querySelectorAll("#segMasVendidos button").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      render();
-    });
-  });
+    let productos = [...(data.productos || [])].filter(p => p.stockTotal > 0);
+    if (ultimasCategoria) productos = productos.filter(p => p.categoria === ultimasCategoria);
+    if (ultimasBuscar.trim()) { const q = ultimasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
 
-  document.querySelectorAll("#segStock button").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      criterioStock = btn.dataset.crit;
-      document.querySelectorAll("#segStock button").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      renderStock();
-    });
-  });
+    productos = productos.map(p => ({ p, dias: diasHastaAgotarse(p, periodoUltimas), vendidas: p.ventasPorPeriodo[periodoUltimas]?.unidades || 0 }))
+      .filter(x => x.vendidas > 0);
 
-  document.getElementById("buscarStock").addEventListener("input", (e) => {
-    filtroStock = e.target.value;
+    if (ultimasRapido) productos = productos.filter(x => x.dias <= 30);
+    productos.sort((a, b) => a.dias - b.dias);
+
+    document.getElementById("ultimasLista").innerHTML = productos.slice(0, 100).map(({ p, dias, vendidas }) => {
+      const diasDelPeriodo = (data.periodosDias || {})[periodoUltimas] || 30;
+      const ritmo = (vendidas / diasDelPeriodo).toFixed(1);
+      return `
+      <div class="card p-4 flex items-center gap-4 ${dias <= 15 ? "border-amber-300" : ""}">
+        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm mb-1">${p.producto}</div>
+          <div class="text-xs text-slate-500"><b>${fmtNum(p.stockTotal)}</b> stock · <b>${fmtNum(vendidas)}</b> vendidas · ${ritmo}/día</div>
+          <div class="mt-1"><span class="chip chip-amber">~${Math.round(dias)} días</span></div>
+        </div>
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm p-4">Sin productos que se estén por agotar en este período.</div>';
+  }
+
+  // ---------------- Productos vendidos ----------------
+  function renderVendidos() {
+    pillsHtml("pillsPeriodoVendidos", periodoVendidos, (k) => { periodoVendidos = k; renderVendidos(); });
+    llenarSelectCategorias("vendidosCategoria", vendidosCategoria);
+
+    let productos = [...(data.productos || [])];
+    if (vendidosCategoria) productos = productos.filter(p => p.categoria === vendidosCategoria);
+    if (vendidosBuscar.trim()) { const q = vendidosBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+
+    productos = productos.filter(p => (p.ventasPorPeriodo[periodoVendidos]?.unidades || 0) > 0);
+    productos.sort((a, b) => (b.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) - (a.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0));
+
+    document.getElementById("vendidosCount").textContent = `${productos.length} productos con ventas`;
+
+    document.getElementById("vendidosTabla").innerHTML = productos.slice(0, 100).map((p, i) => {
+      const v = p.ventasPorPeriodo[periodoVendidos];
+      return `
+      <tr class="border-b border-slate-50">
+        <td class="py-2.5 px-4 text-slate-400">${i + 1}</td>
+        <td class="py-2.5 px-4 font-semibold">${p.producto}</td>
+        <td class="py-2.5 px-4 text-right font-bold text-indigo-600">${vendidosCriterio === "facturacion" ? fmtMoney(v.facturacion) : fmtNum(v.unidades)}</td>
+        <td class="py-2.5 px-4 text-right">${fmtNum(v.pedidos)}</td>
+        <td class="py-2.5 px-4 text-right text-slate-400">${fmtFecha(p.ventasTotales.ultimaVenta)}</td>
+      </tr>`;
+    }).join("") || '<tr><td colspan="5" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
+  }
+
+  // ---------------- Productos nuevos ----------------
+  function renderNuevos() {
+    const PERIODOS_NUEVOS = [{ key: "7dias", label: "Últimos 7 días" }, { key: "15dias", label: "Últimos 15 días" }, { key: "30dias", label: "Último mes" }];
+    const el = document.getElementById("pillsPeriodoNuevos");
+    el.innerHTML = PERIODOS_NUEVOS.map(p => `<button class="pill ${p.key === periodoNuevos ? "active" : ""}" data-key="${p.key}">${p.label}</button>`).join("");
+    el.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => { periodoNuevos = btn.dataset.key; renderNuevos(); }));
+
+    const dias = (data.periodosDias || {})[periodoNuevos] || 15;
+    const corte = new Date(); corte.setDate(corte.getDate() - dias);
+
+    let productos = (data.productos || []).filter(p => p.creado && new Date(p.creado) >= corte);
+    if (nuevosBuscar.trim()) { const q = nuevosBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+
+    const vendieron = productos.filter(p => p.ventasTotales.unidades > 0).sort((a, b) => new Date(b.creado) - new Date(a.creado));
+    const sinVenta = productos.filter(p => p.ventasTotales.unidades === 0).sort((a, b) => new Date(b.creado) - new Date(a.creado));
+
+    document.getElementById("nuevosCount").textContent = `${productos.length} productos agregados · ${vendieron.length} ya vendieron · ${sinVenta.length} sin ventas`;
+    document.getElementById("nuevosVendieronTitulo").textContent = `YA VENDIERON (${vendieron.length})`;
+    document.getElementById("nuevosSinVentaTitulo").textContent = `SIN VENTAS (${sinVenta.length})`;
+
+    function card(p) {
+      return `
+      <div class="card p-4 flex items-center gap-4">
+        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm">${p.producto}</div>
+          <div class="text-xs text-slate-400 mt-0.5">${p.categoria} · alta ${fmtFecha(p.creado)}</div>
+          ${p.ventasTotales.unidades > 0 ? `<span class="chip chip-green mt-1 inline-block">${fmtNum(p.ventasTotales.unidades)} vendidas</span>` : ""}
+        </div>
+        <div class="text-right flex-shrink-0"><div class="text-lg font-bold">${fmtNum(p.stockTotal)}</div><div class="text-xs text-slate-400">unid.</div></div>
+      </div>`;
+    }
+    document.getElementById("nuevosVendieron").innerHTML = vendieron.map(card).join("") || '<div class="text-slate-400 text-sm">Ninguno todavía.</div>';
+    document.getElementById("nuevosSinVenta").innerHTML = sinVenta.map(card).join("") || '<div class="text-slate-400 text-sm">Todos vendieron.</div>';
+  }
+
+  // ---------------- Sin ventas ----------------
+  function renderSinVentas() {
+    pillsHtml("pillsPeriodoSinVentas", periodoSinVentas, (k) => { periodoSinVentas = k; renderSinVentas(); });
+    llenarSelectCategorias("sinventasCategoria", sinventasCategoria);
+
+    let productos = (data.productos || []).filter(p => (p.ventasPorPeriodo[periodoSinVentas]?.unidades || 0) === 0);
+    if (sinventasCategoria) productos = productos.filter(p => p.categoria === sinventasCategoria);
+    if (sinventasBuscar.trim()) { const q = sinventasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+
+    if (sinventasStock === "conStock") productos = productos.filter(p => p.stockTotal > 0);
+    else if (sinventasStock === "sinStock") productos = productos.filter(p => p.stockTotal === 0);
+
+    const sorters = {
+      masNuevos: (a, b) => new Date(b.creado || 0) - new Date(a.creado || 0),
+      mayorStock: (a, b) => b.stockTotal - a.stockTotal,
+      menorStock: (a, b) => a.stockTotal - b.stockTotal,
+      sinVenderMasTiempo: (a, b) => new Date(a.ventasTotales.ultimaVenta || 0) - new Date(b.ventasTotales.ultimaVenta || 0),
+      nombre: (a, b) => a.producto.localeCompare(b.producto, "es"),
+    };
+    productos.sort(sorters[sinventasOrden] || sorters.masNuevos);
+
+    document.getElementById("sinventasCount").textContent = `${productos.length} productos sin ventas`;
+
+    document.getElementById("sinventasLista").innerHTML = productos.slice(0, 100).map(p => `
+      <div class="card p-4 flex items-center gap-4">
+        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <div class="flex-1 min-w-0">
+          <div class="font-bold text-sm">${p.producto}</div>
+          <div class="text-xs text-slate-400 mt-0.5">${p.categoria} ${p.publicado ? '· <span class="text-green-600 font-semibold">Publicado</span>' : '· <span class="text-slate-400">Oculto</span>'}</div>
+          <div class="text-xs text-slate-400 mt-0.5">Última venta: ${fmtFecha(p.ventasTotales.ultimaVenta)}</div>
+        </div>
+        <div class="text-right flex-shrink-0"><div class="text-lg font-bold">${fmtNum(p.stockTotal)}</div><div class="text-xs text-slate-400">unid.</div></div>
+      </div>`).join("") || '<div class="text-slate-400 text-sm p-4">Ningún producto coincide con el filtro.</div>';
+  }
+
+  function renderAll() {
+    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas();
+  }
+
+  // ---------------- Listeners ----------------
+  document.getElementById("stockBuscar").addEventListener("input", e => { stockBuscar = e.target.value; renderStock(); });
+  document.getElementById("stockMin").addEventListener("input", e => { stockMin = e.target.value === "" ? null : Number(e.target.value); renderStock(); });
+  document.getElementById("stockMax").addEventListener("input", e => { stockMax = e.target.value === "" ? null : Number(e.target.value); renderStock(); });
+  document.getElementById("stockCategoria").addEventListener("change", e => { stockCategoria = e.target.value; renderStock(); });
+  document.getElementById("stockOcultos").addEventListener("change", e => { stockOcultos = e.target.checked; renderStock(); });
+  document.getElementById("stockOrden").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    stockOrden = btn.dataset.crit;
+    document.querySelectorAll("#stockOrden button").forEach(b => b.classList.toggle("active", b === btn));
     renderStock();
   });
 
-  document.getElementById("btnActualizar").addEventListener("click", async () => {
-    const btn = document.getElementById("btnActualizar");
-    const icon = document.getElementById("iconRefresh");
-    btn.disabled = true;
-    const original = icon.textContent;
-    icon.textContent = "Actualizando…";
-    // Placeholder: conectar con GitHub Actions workflow_dispatch es un paso
-    // opcional aparte (requiere token). Por ahora, vuelve a leer Firebase.
-    setTimeout(() => {
-      btn.disabled = false;
-      icon.textContent = original;
-    }, 1200);
+  document.getElementById("ultimasCategoria").addEventListener("change", e => { ultimasCategoria = e.target.value; renderUltimas(); });
+  document.getElementById("ultimasBuscar").addEventListener("input", e => { ultimasBuscar = e.target.value; renderUltimas(); });
+  document.getElementById("ultimasRapido").addEventListener("click", () => { ultimasRapido = true; document.getElementById("ultimasRapido").classList.add("active"); document.getElementById("ultimasTodos").classList.remove("active"); renderUltimas(); });
+  document.getElementById("ultimasTodos").addEventListener("click", () => { ultimasRapido = false; document.getElementById("ultimasTodos").classList.add("active"); document.getElementById("ultimasRapido").classList.remove("active"); renderUltimas(); });
+
+  document.getElementById("vendidosCategoria").addEventListener("change", e => { vendidosCategoria = e.target.value; renderVendidos(); });
+  document.getElementById("vendidosBuscar").addEventListener("input", e => { vendidosBuscar = e.target.value; renderVendidos(); });
+  document.getElementById("vendidosCriterio").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    vendidosCriterio = btn.dataset.crit;
+    document.querySelectorAll("#vendidosCriterio button").forEach(b => b.classList.toggle("active", b === btn));
+    renderVendidos();
   });
 
-  cargarDatos();
+  document.getElementById("nuevosBuscar").addEventListener("input", e => { nuevosBuscar = e.target.value; renderNuevos(); });
+
+  document.getElementById("sinventasCategoria").addEventListener("change", e => { sinventasCategoria = e.target.value; renderSinVentas(); });
+  document.getElementById("sinventasBuscar").addEventListener("input", e => { sinventasBuscar = e.target.value; renderSinVentas(); });
+  document.getElementById("sinventasStockFiltro").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    sinventasStock = btn.dataset.crit;
+    document.querySelectorAll("#sinventasStockFiltro button").forEach(b => b.classList.toggle("active", b === btn));
+    renderSinVentas();
+  });
+  document.getElementById("sinventasOrden").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    sinventasOrden = btn.dataset.crit;
+    document.querySelectorAll("#sinventasOrden button").forEach(b => b.classList.toggle("active", b === btn));
+    renderSinVentas();
+  });
+
+  document.getElementById("btnActualizar").addEventListener("click", (e) => {
+    e.target.disabled = true;
+    setTimeout(() => { e.target.disabled = false; }, 1200);
+  });
+
+  db.ref("dashboard").on("value", (snap) => {
+    data = snap.val();
+    if (!data) return;
+    document.getElementById("ultimaActualizacion").textContent = "Actualizado: " + new Date(data.actualizado).toLocaleString("es-AR");
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("app").classList.remove("hidden");
+    renderAll();
+  }, (err) => {
+    document.getElementById("loading").innerHTML = '<div class="text-red-500 text-sm">Error cargando datos: ' + err.message + "</div>";
+  });
 </script>
 
 </body>
