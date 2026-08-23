@@ -200,6 +200,7 @@ function construirMetadata(products) {
     productMeta.set(p.id, { categoria });
     (p.variants || []).forEach((v) => {
       variantMeta.set(v.id, {
+        productId: p.id,
         color: v.values?.[0]?.es || null,
         talle: v.values?.[1]?.es || v.values?.[0]?.es || null,
       });
@@ -209,19 +210,39 @@ function construirMetadata(products) {
   return { productMeta, variantMeta };
 }
 
+function calcularPorTag(orders, desde, hasta, productTags, top = 12) {
+  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
+  const acc = new Map();
+  pagados.forEach((o) => {
+    (o.products || []).forEach((li) => {
+      const tags = productTags.get(li.product_id) || [];
+      tags.forEach((tag) => {
+        const prev = acc.get(tag) || { tag, unidades: 0, facturacion: 0 };
+        prev.unidades += Number(li.quantity || 0);
+        prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
+        acc.set(tag, prev);
+      });
+    });
+  });
+  return Array.from(acc.values()).sort((a, b) => b.unidades - a.unidades).slice(0, top);
+}
+
 // ---------- Ventas por producto: histórico + por período ----------
-function construirVentasPorProducto(orders, periods) {
+function construirVentasPorProducto(orders, periods, variantMeta) {
   const ventas = new Map();
 
   function getEntry(productId) {
     if (!ventas.has(productId)) {
       const porPeriodo = {};
+      const colorPorPeriodo = {};
       Object.keys(periods).forEach((k) => {
         porPeriodo[k] = { unidades: 0, facturacion: 0, pedidoIds: new Set() };
+        colorPorPeriodo[k] = new Map(); // color -> unidades
       });
       ventas.set(productId, {
         alltime: { unidades: 0, facturacion: 0, pedidoIds: new Set(), ultimaVenta: null },
         porPeriodo,
+        colorPorPeriodo,
       });
     }
     return ventas.get(productId);
@@ -234,6 +255,7 @@ function construirVentasPorProducto(orders, periods) {
       const entry = getEntry(li.product_id);
       const unidades = Number(li.quantity || 0);
       const facturacion = Number(li.price || 0) * unidades;
+      const color = variantMeta.get(li.variant_id)?.color || null;
 
       entry.alltime.unidades += unidades;
       entry.alltime.facturacion += facturacion;
@@ -247,6 +269,10 @@ function construirVentasPorProducto(orders, periods) {
           entry.porPeriodo[key].unidades += unidades;
           entry.porPeriodo[key].facturacion += facturacion;
           entry.porPeriodo[key].pedidoIds.add(o.id);
+          if (color) {
+            const mapa = entry.colorPorPeriodo[key];
+            mapa.set(color, (mapa.get(color) || 0) + unidades);
+          }
         }
       });
     });
@@ -261,6 +287,7 @@ function serializarProductos(products, ventasPorProducto, periods) {
     const imagen = p.images?.[0]?.src || null;
     const categoria = p.categories?.[0]?.name?.es || p.categories?.[0]?.name || "Sin categoría";
     const publicado = p.published !== false;
+    const tags = (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
 
     const variantes = (p.variants || []).map((v) => {
       const stock = v.stock === null || v.stock === undefined ? null : Number(v.stock);
@@ -281,7 +308,10 @@ function serializarProductos(products, ventasPorProducto, periods) {
       const color = v.color || "Único";
       colorMap.set(color, (colorMap.get(color) || 0) + (v.stock || 0));
     });
-    const stockPorColor = Array.from(colorMap.entries()).map(([color, stock]) => ({ color, stock }));
+    const stockPorColor = Array.from(colorMap.entries())
+      .map(([color, stock]) => ({ color, stock }))
+      .sort((a, b) => b.stock - a.stock);
+    const colorMasStock = stockPorColor.length ? stockPorColor[0] : null;
 
     const ventas = ventasPorProducto.get(p.id);
     const ventasTotales = ventas
@@ -296,10 +326,15 @@ function serializarProductos(products, ventasPorProducto, periods) {
     const ventasPorPeriodo = {};
     Object.keys(periods).forEach((key) => {
       const v = ventas ? ventas.porPeriodo[key] : null;
+      const colorMap = ventas ? ventas.colorPorPeriodo[key] : new Map();
+      const coloresVendidos = Array.from(colorMap.entries())
+        .map(([color, unidades]) => ({ color, unidades }))
+        .sort((a, b) => b.unidades - a.unidades);
       ventasPorPeriodo[key] = {
         unidades: v ? v.unidades : 0,
         facturacion: v ? v.facturacion : 0,
         pedidos: v ? v.pedidoIds.size : 0,
+        colorMasVendido: coloresVendidos.length ? coloresVendidos[0] : null,
       };
     });
 
@@ -308,10 +343,12 @@ function serializarProductos(products, ventasPorProducto, periods) {
       producto: nombre,
       imagen,
       categoria,
+      tags,
       publicado,
       creado: p.created_at,
       stockTotal,
       stockPorColor,
+      colorMasStock,
       variantes: variantes.sort((a, b) => (a.stock || 0) - (b.stock || 0)),
       ventasTotales,
       ventasPorPeriodo,
@@ -338,17 +375,20 @@ async function main() {
   Object.entries(periods).forEach(([k, v]) => (periodosDias[k] = v.dias));
 
   const { productMeta, variantMeta } = construirMetadata(products);
+  const productTags = new Map(products.map((p) => [p.id, (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean)]));
 
   const kpisPorPeriodo = {};
   const porCategoriaPorPeriodo = {};
   const porTallePorPeriodo = {};
+  const porTagPorPeriodo = {};
   Object.entries(periods).forEach(([key, { desde, hasta }]) => {
     kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta);
     porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta);
     porTallePorPeriodo[key] = calcularPorTalle(orders, desde, hasta, variantMeta);
+    porTagPorPeriodo[key] = calcularPorTag(orders, desde, hasta, productTags);
   });
 
-  const ventasPorProducto = construirVentasPorProducto(orders, periods);
+  const ventasPorProducto = construirVentasPorProducto(orders, periods, variantMeta);
   const productos = serializarProductos(products, ventasPorProducto, periods);
 
   const db = initFirebase();
@@ -358,6 +398,7 @@ async function main() {
     kpisPorPeriodo,
     porCategoriaPorPeriodo,
     porTallePorPeriodo,
+    porTagPorPeriodo,
     productos,
   };
 
