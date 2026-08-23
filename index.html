@@ -192,6 +192,7 @@
       </div>
 
       <div class="card overflow-hidden">
+        <div class="px-4 py-2 text-xs text-slate-400 border-b border-slate-100 bg-slate-50">💡 Hacé click en un producto para ver qué colores y talles reponer.</div>
         <table class="w-full text-sm">
           <thead id="vendidosTablaHead">
             <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
@@ -258,6 +259,47 @@
       </div>
 
       <div id="sinventasLista" class="space-y-3"></div>
+    </div>
+
+    <!-- ===================== MODAL REPOSICIÓN ===================== -->
+    <div id="modalReposicion" class="hidden fixed inset-0 bg-black/40 items-center justify-center z-50 p-4" onclick="if(event.target===this) cerrarReposicion();">
+      <div class="bg-white rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6">
+        <div class="flex items-start justify-between mb-1 gap-3">
+          <div class="min-w-0">
+            <div class="text-[11px] font-semibold text-indigo-500 uppercase tracking-wide" id="reposicionPeriodoLabel"></div>
+            <h2 class="text-lg font-bold text-slate-900 leading-tight" id="reposicionTitulo"></h2>
+          </div>
+          <button class="text-slate-400 hover:text-slate-700 text-2xl leading-none flex-shrink-0" onclick="cerrarReposicion()">&times;</button>
+        </div>
+        <p class="text-xs text-slate-400 mt-1 mb-4">Prioridad calculada según stock actual vs. velocidad de venta en el período elegido.</p>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+          <div class="card p-4">
+            <div class="font-bold text-sm mb-2">🎨 Colores a reponer</div>
+            <div id="reposicionColores" class="space-y-1.5 text-sm"></div>
+          </div>
+          <div class="card p-4">
+            <div class="font-bold text-sm mb-2">📐 Talles para hacer énfasis</div>
+            <div id="reposicionTalles" class="space-y-1.5 text-sm"></div>
+          </div>
+        </div>
+
+        <div class="card overflow-hidden">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+                <th class="py-2 px-3">Color</th>
+                <th class="py-2 px-3">Talle</th>
+                <th class="py-2 px-3 text-right">Vendidos</th>
+                <th class="py-2 px-3 text-right">Stock</th>
+                <th class="py-2 px-3 text-right">Días de stock</th>
+                <th class="py-2 px-3">Prioridad</th>
+              </tr>
+            </thead>
+            <tbody id="reposicionTabla"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -513,7 +555,7 @@
       return `
       <tr class="border-b border-slate-50">
         <td class="py-2.5 px-4 text-slate-400">${i + 1}</td>
-        <td class="py-2.5 px-4 font-semibold">${p.producto}</td>
+        <td class="py-2.5 px-4 font-semibold text-indigo-700 hover:underline cursor-pointer" onclick="abrirReposicion('${p.id}')">${p.producto}</td>
         <td class="py-2.5 px-4 text-slate-500">${colorTop}</td>
         <td class="py-2.5 px-4 text-right font-bold text-indigo-600">${vendidosCriterio === "facturacion" ? fmtMoney(v.facturacion) : fmtNum(v.unidades)}</td>
         <td class="py-2.5 px-4 text-right">${fmtNum(v.pedidos)}</td>
@@ -542,19 +584,136 @@
         ? [...v.variantesVendidas].sort((a, b) => (b[vendidosCriterio] || 0) - (a[vendidosCriterio] || 0))
         : [{ color: v.colorMasVendido?.color || "—", talle: "—", unidades: v.unidades, facturacion: v.facturacion }];
       variantes.forEach((vari, idx) => {
-        filas.push({ producto: p.producto, primero: idx === 0, cantVariantes: variantes.length, vari });
+        filas.push({ id: p.id, producto: p.producto, primero: idx === 0, cantVariantes: variantes.length, vari });
       });
     });
 
     document.getElementById("vendidosTabla").innerHTML = filas.map((f, i) => `
       <tr class="border-b border-slate-50 ${f.primero ? "" : "bg-slate-50/40"}">
         <td class="py-2 px-4 text-slate-400">${f.primero ? "" : ""}</td>
-        <td class="py-2 px-4 ${f.primero ? "font-semibold" : "text-slate-400 pl-6"}">${f.primero ? f.producto : "↳"}</td>
+        <td class="py-2 px-4 ${f.primero ? "font-semibold text-indigo-700 hover:underline cursor-pointer" : "text-slate-400 pl-6"}" ${f.primero ? `onclick="abrirReposicion('${f.id}')"` : ""}>${f.primero ? f.producto : "↳"}</td>
         <td class="py-2 px-4 text-slate-600">${f.vari.color || "—"}</td>
         <td class="py-2 px-4 text-slate-600">${f.vari.talle || "—"}</td>
         <td class="py-2 px-4 text-right font-bold text-indigo-600">${fmtNum(f.vari.unidades)}</td>
         <td class="py-2 px-4 text-right text-slate-500">${fmtMoney(f.vari.facturacion)}</td>
       </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
+  }
+
+  // ---------------- Reposición por variante (color/talle) ----------------
+  function diasParaPeriodo(periodo) {
+    return (data.periodosDias && data.periodosDias[periodo]) || 30;
+  }
+
+  function stockPorVariante(p) {
+    const map = new Map();
+    (p.variantes || []).forEach(v => {
+      const key = `${v.color || "Sin color"} / ${v.talle || "Sin talle"}`;
+      const prev = map.get(key) || { color: v.color || "Sin color", talle: v.talle || "Sin talle", stock: 0 };
+      prev.stock += Number(v.stock || 0);
+      map.set(key, prev);
+    });
+    return map;
+  }
+
+  // Umbral de "reponer pronto": al ritmo actual, se agota en 15 días o menos.
+  const DIAS_STOCK_CRITICO = 15;
+  function clasificarPrioridad(unidades, stock, diasStock) {
+    if (unidades === 0) return { prioridad: "Sin ventas en el período", orden: 3, chip: "chip-ok" };
+    if (stock === 0) return { prioridad: "Reponer urgente", orden: 0, chip: "chip-low" };
+    if (diasStock !== null && diasStock <= DIAS_STOCK_CRITICO) return { prioridad: "Reponer pronto", orden: 1, chip: "chip-amber" };
+    return { prioridad: "Stock ok", orden: 2, chip: "chip-green" };
+  }
+
+  // Combina, por producto, las ventas por variante del período con el stock
+  // actual de esa misma variante, y arma una fila por color+talle con su
+  // prioridad de reposición (de más a menos urgente).
+  function calcularReposicion(p, periodo) {
+    const dias = diasParaPeriodo(periodo);
+    const ventas = (p.ventasPorPeriodo[periodo]?.variantesVendidas) || [];
+    const stockMap = stockPorVariante(p);
+
+    const keys = new Set([...stockMap.keys(), ...ventas.map(v => v.variante)]);
+    const filas = Array.from(keys).map(key => {
+      const s = stockMap.get(key);
+      const v = ventas.find(x => x.variante === key);
+      const color = (s && s.color) || (v && v.color) || "Sin color";
+      const talle = (s && s.talle) || (v && v.talle) || "Sin talle";
+      const stock = s ? s.stock : 0;
+      const unidades = v ? v.unidades : 0;
+      const facturacion = v ? v.facturacion : 0;
+      const velocidadDiaria = unidades / dias;
+      const diasStock = velocidadDiaria > 0 ? stock / velocidadDiaria : null;
+      return { color, talle, stock, unidades, facturacion, diasStock, ...clasificarPrioridad(unidades, stock, diasStock) };
+    });
+
+    filas.sort((a, b) => a.orden - b.orden || b.unidades - a.unidades);
+    return filas;
+  }
+
+  // Agrupa las filas de calcularReposicion por color o por talle, para los
+  // dos resúmenes del modal ("Colores a reponer" / "Talles para hacer énfasis").
+  function agruparReposicion(filas, campo, periodo) {
+    const dias = diasParaPeriodo(periodo);
+    const map = new Map();
+    filas.forEach(f => {
+      const key = f[campo];
+      const prev = map.get(key) || { [campo]: key, unidades: 0, stock: 0 };
+      prev.unidades += f.unidades;
+      prev.stock += f.stock;
+      map.set(key, prev);
+    });
+    const arr = Array.from(map.values()).map(g => {
+      const velocidadDiaria = g.unidades / dias;
+      const diasStock = velocidadDiaria > 0 ? g.stock / velocidadDiaria : null;
+      return { ...g, diasStock, ...clasificarPrioridad(g.unidades, g.stock, diasStock) };
+    });
+    arr.sort((a, b) => a.orden - b.orden || b.unidades - a.unidades);
+    return arr;
+  }
+
+  function abrirReposicion(productId) {
+    const p = (data.productos || []).find(x => String(x.id) === String(productId));
+    if (!p) return;
+    const periodo = periodoVendidos;
+    const filas = calcularReposicion(p, periodo);
+    const porColor = agruparReposicion(filas, "color", periodo);
+    const porTalle = agruparReposicion(filas, "talle", periodo);
+    const periodoLabel = (PERIODOS.find(x => x.key === periodo) || {}).label || periodo;
+
+    document.getElementById("reposicionPeriodoLabel").textContent = `Reposición sugerida · ${periodoLabel}`;
+    document.getElementById("reposicionTitulo").textContent = p.producto;
+
+    const filaResumen = (g, campo) => `
+      <div class="flex items-center justify-between gap-2">
+        <span class="truncate">${g[campo]}</span>
+        <span class="flex items-center gap-2 flex-shrink-0">
+          <span class="text-xs text-slate-400">${fmtNum(g.unidades)} v. / ${fmtNum(g.stock)} stock</span>
+          <span class="chip ${g.chip}">${g.prioridad}</span>
+        </span>
+      </div>`;
+
+    document.getElementById("reposicionColores").innerHTML = porColor.map(g => filaResumen(g, "color")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+    document.getElementById("reposicionTalles").innerHTML = porTalle.map(g => filaResumen(g, "talle")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    document.getElementById("reposicionTabla").innerHTML = filas.map(f => `
+      <tr class="border-b border-slate-50">
+        <td class="py-2 px-3">${f.color}</td>
+        <td class="py-2 px-3">${f.talle}</td>
+        <td class="py-2 px-3 text-right font-semibold">${fmtNum(f.unidades)}</td>
+        <td class="py-2 px-3 text-right">${fmtNum(f.stock)}</td>
+        <td class="py-2 px-3 text-right text-slate-500">${f.diasStock === null ? "—" : fmtNum(f.diasStock)}</td>
+        <td class="py-2 px-3"><span class="chip ${f.chip}">${f.prioridad}</span></td>
+      </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin datos.</td></tr>';
+
+    const modal = document.getElementById("modalReposicion");
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+  }
+
+  function cerrarReposicion() {
+    const modal = document.getElementById("modalReposicion");
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
   }
 
   // "Productos ganadores": los que venden por encima del promedio (según el
