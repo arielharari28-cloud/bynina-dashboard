@@ -190,11 +190,13 @@ function calcularPorCategoria(orders, desde, hasta, productMeta, top = 8) {
   pagados.forEach((o) => {
     (o.products || []).forEach((li) => {
       const meta = productMeta.get(li.product_id);
-      const categoria = (meta && meta.categoria) || "Sin categoría";
-      const prev = acc.get(categoria) || { categoria, unidades: 0, facturacion: 0 };
-      prev.unidades += Number(li.quantity || 0);
-      prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
-      acc.set(categoria, prev);
+      const categorias = (meta && meta.categorias) || ["Sin categoría"];
+      categorias.forEach((categoria) => {
+        const prev = acc.get(categoria) || { categoria, unidades: 0, facturacion: 0 };
+        prev.unidades += Number(li.quantity || 0);
+        prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
+        acc.set(categoria, prev);
+      });
     });
   });
   return Array.from(acc.values()).sort((a, b) => b.unidades - a.unidades).slice(0, top);
@@ -222,8 +224,8 @@ function construirMetadata(products) {
   const variantMeta = new Map();
 
   products.forEach((p) => {
-    const categoria = p.categories?.[0]?.name?.es || p.categories?.[0]?.name || null;
-    productMeta.set(p.id, { categoria });
+    const categorias = (p.categories || []).map((c) => c.name?.es || c.name).filter(Boolean);
+    productMeta.set(p.id, { categorias: categorias.length ? categorias : ["Sin categoría"] });
     (p.variants || []).forEach((v) => {
       variantMeta.set(v.id, {
         productId: p.id,
@@ -336,7 +338,9 @@ function serializarProductos(products, ventasPorProducto, periods) {
   return products.map((p) => {
     const nombre = p.name?.es || p.name;
     const imagen = p.images?.[0]?.src || null;
-    const categoria = p.categories?.[0]?.name?.es || p.categories?.[0]?.name || "Sin categoría";
+    const categoriasArr = (p.categories || []).map((c) => c.name?.es || c.name).filter(Boolean);
+    const categoria = categoriasArr[0] || "Sin categoría";
+    const categorias = categoriasArr.length ? categoriasArr : ["Sin categoría"];
     const publicado = p.published !== false;
     const tags = (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
 
@@ -405,6 +409,7 @@ function serializarProductos(products, ventasPorProducto, periods) {
       producto: nombre,
       imagen,
       categoria,
+      categorias,
       tags,
       publicado,
       creado: p.created_at,
