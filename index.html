@@ -169,18 +169,31 @@
 
       <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoVendidos"></div>
 
-      <div class="flex flex-wrap gap-2 items-center mb-4">
+      <div class="flex flex-wrap gap-2 items-center mb-3">
         <select id="vendidosCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
         <div class="flex gap-1.5" id="vendidosCriterio">
           <button class="pill active" data-crit="unidades">Por unidades</button>
           <button class="pill" data-crit="facturacion">Por facturación</button>
         </div>
+        <div class="flex gap-1.5" id="vendidosVistaSel">
+          <button class="pill active" data-vista="sinVariantes">Sin variantes</button>
+          <button class="pill" data-vista="conVariantes">Con variantes</button>
+        </div>
         <input type="search" id="vendidosBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
+      </div>
+
+      <div class="card p-5 mb-4 border-indigo-200 bg-indigo-50/40" id="vendidosGanadoresBox">
+        <div class="flex items-center justify-between mb-1">
+          <div class="font-bold text-sm text-indigo-800">🏅 Productos ganadores</div>
+          <span class="text-xs text-indigo-500" id="vendidosGanadoresPromedio"></span>
+        </div>
+        <p class="text-xs text-slate-500 mb-3" id="vendidosGanadoresDesc"></p>
+        <div id="vendidosGanadoresLista" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
       </div>
 
       <div class="card overflow-hidden">
         <table class="w-full text-sm">
-          <thead>
+          <thead id="vendidosTablaHead">
             <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
               <th class="py-2.5 px-4">#</th>
               <th class="py-2.5 px-4">Producto</th>
@@ -268,7 +281,7 @@
 
   let stockOrden = "nombre", stockBuscar = "", stockMin = null, stockMax = null, stockCategoria = "", stockOcultos = false;
   let ultimasRapido = true, ultimasCategoria = "", ultimasBuscar = "";
-  let vendidosCriterio = "unidades", vendidosCategoria = "", vendidosBuscar = "";
+  let vendidosCriterio = "unidades", vendidosCategoria = "", vendidosBuscar = "", vendidosVista = "sinVariantes";
   let nuevosBuscar = "";
   let sinventasStock = "conStock", sinventasOrden = "masNuevos", sinventasCategoria = "", sinventasBuscar = "";
 
@@ -466,6 +479,23 @@
 
     document.getElementById("vendidosCount").textContent = `${productos.length} productos con ventas`;
 
+    renderGanadores(productos);
+
+    if (vendidosVista === "conVariantes") renderVendidosConVariantes(productos);
+    else renderVendidosSinVariantes(productos);
+  }
+
+  function renderVendidosSinVariantes(productos) {
+    document.getElementById("vendidosTablaHead").innerHTML = `
+      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+        <th class="py-2.5 px-4">#</th>
+        <th class="py-2.5 px-4">Producto</th>
+        <th class="py-2.5 px-4">Color que más sale</th>
+        <th class="py-2.5 px-4 text-right">Unidades</th>
+        <th class="py-2.5 px-4 text-right">Pedidos</th>
+        <th class="py-2.5 px-4 text-right">Última venta</th>
+      </tr>`;
+
     document.getElementById("vendidosTabla").innerHTML = productos.slice(0, 100).map((p, i) => {
       const v = p.ventasPorPeriodo[periodoVendidos];
       const colorTop = v.colorMasVendido ? `${v.colorMasVendido.color} (${fmtNum(v.colorMasVendido.unidades)} u.)` : "—";
@@ -479,6 +509,80 @@
         <td class="py-2.5 px-4 text-right text-slate-400">${fmtFecha(p.ventasTotales.ultimaVenta)}</td>
       </tr>`;
     }).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
+  }
+
+  // "Con variantes": desglosa cada producto en sus combinaciones color/talle
+  // vendidas en el período, ordenadas dentro de cada producto por el criterio elegido.
+  function renderVendidosConVariantes(productos) {
+    document.getElementById("vendidosTablaHead").innerHTML = `
+      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+        <th class="py-2.5 px-4">#</th>
+        <th class="py-2.5 px-4">Producto</th>
+        <th class="py-2.5 px-4">Color</th>
+        <th class="py-2.5 px-4">Talle</th>
+        <th class="py-2.5 px-4 text-right">Unidades</th>
+        <th class="py-2.5 px-4 text-right">Facturación</th>
+      </tr>`;
+
+    let filas = [];
+    productos.slice(0, 100).forEach((p) => {
+      const v = p.ventasPorPeriodo[periodoVendidos];
+      const variantes = (v.variantesVendidas && v.variantesVendidas.length)
+        ? [...v.variantesVendidas].sort((a, b) => (b[vendidosCriterio] || 0) - (a[vendidosCriterio] || 0))
+        : [{ color: v.colorMasVendido?.color || "—", talle: "—", unidades: v.unidades, facturacion: v.facturacion }];
+      variantes.forEach((vari, idx) => {
+        filas.push({ producto: p.producto, primero: idx === 0, cantVariantes: variantes.length, vari });
+      });
+    });
+
+    document.getElementById("vendidosTabla").innerHTML = filas.map((f, i) => `
+      <tr class="border-b border-slate-50 ${f.primero ? "" : "bg-slate-50/40"}">
+        <td class="py-2 px-4 text-slate-400">${f.primero ? "" : ""}</td>
+        <td class="py-2 px-4 ${f.primero ? "font-semibold" : "text-slate-400 pl-6"}">${f.primero ? f.producto : "↳"}</td>
+        <td class="py-2 px-4 text-slate-600">${f.vari.color || "—"}</td>
+        <td class="py-2 px-4 text-slate-600">${f.vari.talle || "—"}</td>
+        <td class="py-2 px-4 text-right font-bold text-indigo-600">${fmtNum(f.vari.unidades)}</td>
+        <td class="py-2 px-4 text-right text-slate-500">${fmtMoney(f.vari.facturacion)}</td>
+      </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
+  }
+
+  // "Productos ganadores": los que venden por encima del promedio (según el
+  // criterio elegido: unidades o facturación) entre los productos con venta
+  // en el período/categoría/búsqueda actual. Para cada uno se muestra el
+  // color y el talle que más vendieron.
+  function renderGanadores(productos) {
+    const valores = productos.map(p => p.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0);
+    const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
+
+    const ganadores = productos
+      .filter(p => (p.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) > promedio)
+      .sort((a, b) => (b.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) - (a.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0));
+
+    const promedioFmt = vendidosCriterio === "facturacion" ? fmtMoney(promedio) : fmtNum(promedio) + " u.";
+    document.getElementById("vendidosGanadoresPromedio").textContent = productos.length ? `Promedio: ${promedioFmt}` : "";
+    document.getElementById("vendidosGanadoresDesc").textContent = productos.length
+      ? `${ganadores.length} de ${productos.length} productos venden por encima del promedio en este período${vendidosCategoria ? " (dentro de " + vendidosCategoria + ")" : ""}.`
+      : "Sin ventas en este período para calcular un promedio.";
+
+    document.getElementById("vendidosGanadoresLista").innerHTML = ganadores.slice(0, 12).map(p => {
+      const v = p.ventasPorPeriodo[periodoVendidos];
+      const valor = v[vendidosCriterio] || 0;
+      const pct = promedio > 0 ? ((valor - promedio) / promedio) * 100 : 0;
+      const colorTop = v.colorMasVendido ? `${v.colorMasVendido.color} (${fmtNum(v.colorMasVendido.unidades)} u.)` : "—";
+      const talleTop = v.talleMasVendido ? `${v.talleMasVendido.talle} (${fmtNum(v.talleMasVendido.unidades)} u.)` : "—";
+      return `
+      <div class="bg-white border border-indigo-100 rounded-lg px-3.5 py-2.5">
+        <div class="flex items-center justify-between gap-2">
+          <div class="font-semibold text-sm text-slate-800 truncate">${p.producto}</div>
+          <span class="chip chip-green flex-shrink-0">▲ ${pct.toFixed(0)}%</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">${vendidosCriterio === "facturacion" ? fmtMoney(valor) : fmtNum(valor) + " u."}</div>
+        <div class="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500 mt-1.5">
+          <span>🎨 Color top: <b class="text-slate-700">${colorTop}</b></span>
+          <span>📐 Talle top: <b class="text-slate-700">${talleTop}</b></span>
+        </div>
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm col-span-2">Ningún producto supera el promedio todavía.</div>';
   }
 
   // ---------------- Productos nuevos ----------------
@@ -581,6 +685,12 @@
     const btn = e.target.closest("button"); if (!btn) return;
     vendidosCriterio = btn.dataset.crit;
     document.querySelectorAll("#vendidosCriterio button").forEach(b => b.classList.toggle("active", b === btn));
+    renderVendidos();
+  });
+  document.getElementById("vendidosVistaSel").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    vendidosVista = btn.dataset.vista;
+    document.querySelectorAll("#vendidosVistaSel button").forEach(b => b.classList.toggle("active", b === btn));
     renderVendidos();
   });
 
