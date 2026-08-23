@@ -83,26 +83,52 @@ async function fetchAllPages(path, params = {}) {
 }
 
 // ---------- Fechas / períodos ----------
-function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
-function endOfDay(d) { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; }
-function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return d; }
+// ---------- Fechas / períodos, ancladas a horario Argentina (UTC-3) ----------
+// GitHub Actions corre en UTC. Sin este ajuste, "Hoy"/"Ayer"/mes se cortan a
+// la medianoche UTC en vez de la medianoche de Buenos Aires, desfasando los
+// cortes hasta 3 horas (ventas de la noche caían en el día siguiente, etc).
+const ARG_OFFSET_MS = 3 * 60 * 60 * 1000; // Argentina no usa horario de verano
+
+function argWallClockParts(date) {
+  const shifted = new Date(date.getTime() - ARG_OFFSET_MS);
+  return { y: shifted.getUTCFullYear(), m: shifted.getUTCMonth(), d: shifted.getUTCDate() };
+}
+function argMidnight(y, m, d) {
+  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0) + ARG_OFFSET_MS);
+}
+function startOfDay(date) {
+  const { y, m, d } = argWallClockParts(date);
+  return argMidnight(y, m, d);
+}
+function endOfDay(date) {
+  return new Date(startOfDay(date).getTime() + 24 * 60 * 60 * 1000 - 1);
+}
+function daysAgo(n) {
+  const d = new Date();
+  d.setTime(d.getTime() - n * 24 * 60 * 60 * 1000);
+  return d;
+}
 
 function buildPeriods() {
   const now = new Date();
   const today = startOfDay(now);
-  const yesterday = daysAgo(1);
-  const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const { y, m, d } = argWallClockParts(now);
+
+  const yesterdayStart = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+  const yesterdayEnd = new Date(today.getTime() - 1);
+
+  const firstOfThisMonth = argMidnight(y, m, 1);
+  const firstOfLastMonth = argMidnight(y, m - 1, 1); // Date.UTC normaliza mes negativo
+  const lastOfLastMonth = new Date(firstOfThisMonth.getTime() - 1);
 
   return {
     hoy: { desde: today, hasta: endOfDay(now), dias: 1 },
-    ayer: { desde: startOfDay(yesterday), hasta: endOfDay(yesterday), dias: 1 },
+    ayer: { desde: yesterdayStart, hasta: yesterdayEnd, dias: 1 },
     "7dias": { desde: startOfDay(daysAgo(7)), hasta: endOfDay(now), dias: 7 },
     "15dias": { desde: startOfDay(daysAgo(15)), hasta: endOfDay(now), dias: 15 },
     "30dias": { desde: startOfDay(daysAgo(30)), hasta: endOfDay(now), dias: 30 },
-    estemes: { desde: startOfDay(firstOfThisMonth), hasta: endOfDay(now), dias: now.getDate() },
-    mesanterior: { desde: startOfDay(firstOfLastMonth), hasta: endOfDay(lastOfLastMonth), dias: 30 },
+    estemes: { desde: firstOfThisMonth, hasta: endOfDay(now), dias: d },
+    mesanterior: { desde: firstOfLastMonth, hasta: lastOfLastMonth, dias: 30 },
   };
 }
 
@@ -291,6 +317,7 @@ function serializarProductos(products, ventasPorProducto, periods) {
 
     const variantes = (p.variants || []).map((v) => {
       const stock = v.stock === null || v.stock === undefined ? null : Number(v.stock);
+      const precio = Number(v.price || 0);
       return {
         id: v.id,
         sku: v.sku || null,
@@ -298,10 +325,12 @@ function serializarProductos(products, ventasPorProducto, periods) {
         talle: v.values?.[1]?.es || null,
         variante: [v.values?.[0]?.es, v.values?.[1]?.es].filter(Boolean).join(" / ") || "Único",
         stock,
+        precio,
       };
     });
 
     const stockTotal = variantes.reduce((acc, v) => acc + (v.stock || 0), 0);
+    const stockValorTotal = variantes.reduce((acc, v) => acc + (v.stock || 0) * (v.precio || 0), 0);
 
     const colorMap = new Map();
     variantes.forEach((v) => {
@@ -347,6 +376,7 @@ function serializarProductos(products, ventasPorProducto, periods) {
       publicado,
       creado: p.created_at,
       stockTotal,
+      stockValorTotal,
       stockPorColor,
       colorMasStock,
       variantes: variantes.sort((a, b) => (a.stock || 0) - (b.stock || 0)),
