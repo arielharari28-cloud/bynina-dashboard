@@ -286,16 +286,7 @@
 
         <div class="card overflow-hidden">
           <table class="w-full text-sm">
-            <thead>
-              <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
-                <th class="py-2 px-3">Color</th>
-                <th class="py-2 px-3">Talle</th>
-                <th class="py-2 px-3 text-right">Vendidos</th>
-                <th class="py-2 px-3 text-right">Stock</th>
-                <th class="py-2 px-3 text-right">Días de stock</th>
-                <th class="py-2 px-3">Prioridad</th>
-              </tr>
-            </thead>
+            <thead id="reposicionTablaHead"></thead>
             <tbody id="reposicionTabla"></tbody>
           </table>
         </div>
@@ -695,6 +686,69 @@
     document.getElementById("reposicionColores").innerHTML = porColor.map(g => filaResumen(g, "color")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
     document.getElementById("reposicionTalles").innerHTML = porTalle.map(g => filaResumen(g, "talle")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
 
+    reposicionFilas = filas;
+    reposicionOrdenCampo = "prioridad";
+    reposicionOrdenDir = "asc";
+    renderReposicionTabla();
+
+    const modal = document.getElementById("modalReposicion");
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+  }
+
+  // Orden de talles habituales para que "Ordenar por talle" tenga sentido
+  // (S antes que M antes que L) en vez de orden alfabético puro.
+  const TALLE_ORDEN = { "XS": 0, "S": 1, "M": 2, "L": 3, "XL": 4, "XXL": 5, "XXXL": 6 };
+
+  const REPOSICION_COLUMNAS = [
+    { campo: "color", label: "Color", align: "left" },
+    { campo: "talle", label: "Talle", align: "left" },
+    { campo: "unidades", label: "Vendidos", align: "right" },
+    { campo: "stock", label: "Stock", align: "right" },
+    { campo: "diasStock", label: "Días de stock", align: "right" },
+    { campo: "prioridad", label: "Prioridad", align: "left" },
+  ];
+
+  let reposicionFilas = [];
+  let reposicionOrdenCampo = "prioridad";
+  let reposicionOrdenDir = "asc";
+
+  function ordenarReposicion(campo) {
+    if (reposicionOrdenCampo === campo) {
+      reposicionOrdenDir = reposicionOrdenDir === "asc" ? "desc" : "asc";
+    } else {
+      reposicionOrdenCampo = campo;
+      // Texto arranca ascendente (A-Z); números y prioridad arrancan mostrando lo más relevante primero.
+      reposicionOrdenDir = (campo === "color" || campo === "talle") ? "asc" : "desc";
+    }
+    renderReposicionTabla();
+  }
+
+  function renderReposicionTabla() {
+    const campo = reposicionOrdenCampo;
+    const dir = reposicionOrdenDir;
+    const mult = dir === "asc" ? 1 : -1;
+
+    const filas = [...reposicionFilas].sort((a, b) => {
+      let va, vb;
+      if (campo === "prioridad") { va = a.orden; vb = b.orden; }
+      else if (campo === "talle") { va = TALLE_ORDEN[a.talle] ?? 99; vb = TALLE_ORDEN[b.talle] ?? 99; }
+      else if (campo === "diasStock") { va = a.diasStock === null ? Infinity : a.diasStock; vb = b.diasStock === null ? Infinity : b.diasStock; }
+      else { va = a[campo]; vb = b[campo]; }
+
+      if (typeof va === "string") return va.localeCompare(vb, "es") * mult;
+      if (va === vb) return b.unidades - a.unidades; // desempate: más vendido primero
+      return (va - vb) * mult;
+    });
+
+    document.getElementById("reposicionTablaHead").innerHTML = `
+      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
+        ${REPOSICION_COLUMNAS.map(c => `
+          <th class="py-2 px-3 ${c.align === "right" ? "text-right" : ""} cursor-pointer select-none hover:text-slate-600" onclick="ordenarReposicion('${c.campo}')">
+            ${c.label}${reposicionOrdenCampo === c.campo ? (reposicionOrdenDir === "asc" ? " ▲" : " ▼") : ""}
+          </th>`).join("")}
+      </tr>`;
+
     document.getElementById("reposicionTabla").innerHTML = filas.map(f => `
       <tr class="border-b border-slate-50">
         <td class="py-2 px-3">${f.color}</td>
@@ -704,10 +758,6 @@
         <td class="py-2 px-3 text-right text-slate-500">${f.diasStock === null ? "—" : fmtNum(f.diasStock)}</td>
         <td class="py-2 px-3"><span class="chip ${f.chip}">${f.prioridad}</span></td>
       </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin datos.</td></tr>';
-
-    const modal = document.getElementById("modalReposicion");
-    modal.classList.remove("hidden");
-    modal.classList.add("flex");
   }
 
   function cerrarReposicion() {
