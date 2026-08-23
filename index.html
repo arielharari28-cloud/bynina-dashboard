@@ -118,6 +118,7 @@
           <button class="pill active" data-crit="nombre">Nombre (A-Z)</button>
           <button class="pill" data-crit="mayorStock">Mayor stock</button>
           <button class="pill" data-crit="menorStock">Menor stock</button>
+          <button class="pill" data-crit="mayorValor">Mayor valor</button>
           <button class="pill" data-crit="masVendidos">Más vendidos</button>
           <button class="pill" data-crit="masRecientes">Más recientes</button>
           <button class="pill" data-crit="masAntiguos">Más antiguos</button>
@@ -381,6 +382,7 @@
       nombre: (a, b) => a.producto.localeCompare(b.producto, "es"),
       mayorStock: (a, b) => b.stockTotal - a.stockTotal,
       menorStock: (a, b) => a.stockTotal - b.stockTotal,
+      mayorValor: (a, b) => (b.stockValorTotal || 0) - (a.stockValorTotal || 0),
       masVendidos: (a, b) => b.ventasTotales.unidades - a.ventasTotales.unidades,
       masRecientes: (a, b) => new Date(b.creado || 0) - new Date(a.creado || 0),
       masAntiguos: (a, b) => new Date(a.creado || 0) - new Date(b.creado || 0),
@@ -392,6 +394,7 @@
     document.getElementById("stockLista").innerHTML = productos.slice(0, 150).map((p, idx) => {
       const chips = p.stockPorColor.slice(0, 4).map(c => `<span class="chip ${c.stock <= 0 ? "chip-low" : "chip-ok"}">${c.color}: ${c.stock}</span>`).join(" ");
       const extra = p.stockPorColor.length > 4 ? `<span class="text-xs text-slate-400">+${p.stockPorColor.length - 4} colores</span>` : "";
+      const valorLine = stockOrden === "mayorValor" ? `<div class="text-xs text-slate-500 font-semibold mt-0.5">Valor en stock: ${fmtMoney(p.stockValorTotal)}</div>` : "";
       return `
       <div class="card p-4 flex items-center gap-4">
         <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
@@ -399,6 +402,7 @@
           <div class="font-bold text-sm mb-1.5">${p.producto}</div>
           <div class="flex flex-wrap gap-1.5 items-center">${chips}${extra}</div>
           <div class="text-xs text-indigo-500 font-semibold mt-1.5">${fmtNum(p.ventasTotales.unidades)} vendidos en total</div>
+          ${valorLine}
         </div>
         <div class="text-right flex-shrink-0">
           <div class="text-xl font-bold">${fmtNum(p.stockTotal)}</div>
