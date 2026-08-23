@@ -303,8 +303,19 @@
   }
 
   function categoriasUnicas() {
-    const set = new Set((data.productos || []).map(p => p.categoria || "Sin categoría"));
+    const set = new Set();
+    (data.productos || []).forEach(p => productoCategorias(p).forEach(c => set.add(c)));
     return Array.from(set).sort();
+  }
+
+  // Devuelve todas las categorías de un producto. Compatible con datos viejos
+  // en Firebase (de antes de guardar el array completo) que solo traían "categoria".
+  function productoCategorias(p) {
+    if (p.categorias && p.categorias.length) return p.categorias;
+    return [p.categoria || "Sin categoría"];
+  }
+  function productoEnCategoria(p, cat) {
+    return productoCategorias(p).includes(cat);
   }
 
   function llenarSelectCategorias(id, current) {
@@ -386,7 +397,7 @@
   function renderStock() {
     let productos = [...(data.productos || [])];
     if (!stockOcultos) productos = productos.filter(p => p.publicado);
-    if (stockCategoria) productos = productos.filter(p => p.categoria === stockCategoria);
+    if (stockCategoria) productos = productos.filter(p => productoEnCategoria(p, stockCategoria));
     if (stockBuscar.trim()) { const q = stockBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
     if (stockMin !== null) productos = productos.filter(p => p.stockTotal >= stockMin);
     if (stockMax !== null) productos = productos.filter(p => p.stockTotal <= stockMax);
@@ -439,7 +450,7 @@
     llenarSelectCategorias("ultimasCategoria", ultimasCategoria);
 
     let productos = [...(data.productos || [])].filter(p => p.stockTotal > 0);
-    if (ultimasCategoria) productos = productos.filter(p => p.categoria === ultimasCategoria);
+    if (ultimasCategoria) productos = productos.filter(p => productoEnCategoria(p, ultimasCategoria));
     if (ultimasBuscar.trim()) { const q = ultimasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
 
     productos = productos.map(p => ({ p, dias: diasHastaAgotarse(p, periodoUltimas), vendidas: p.ventasPorPeriodo[periodoUltimas]?.unidades || 0 }))
@@ -471,7 +482,7 @@
     llenarSelectCategorias("vendidosCategoria", vendidosCategoria);
 
     let productos = [...(data.productos || [])];
-    if (vendidosCategoria) productos = productos.filter(p => p.categoria === vendidosCategoria);
+    if (vendidosCategoria) productos = productos.filter(p => productoEnCategoria(p, vendidosCategoria));
     if (vendidosBuscar.trim()) { const q = vendidosBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
 
     productos = productos.filter(p => (p.ventasPorPeriodo[periodoVendidos]?.unidades || 0) > 0);
@@ -627,7 +638,7 @@
     llenarSelectCategorias("sinventasCategoria", sinventasCategoria);
 
     let productos = (data.productos || []).filter(p => (p.ventasPorPeriodo[periodoSinVentas]?.unidades || 0) === 0);
-    if (sinventasCategoria) productos = productos.filter(p => p.categoria === sinventasCategoria);
+    if (sinventasCategoria) productos = productos.filter(p => productoEnCategoria(p, sinventasCategoria));
     if (sinventasBuscar.trim()) { const q = sinventasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
 
     if (sinventasStock === "conStock") productos = productos.filter(p => p.stockTotal > 0);
