@@ -66,11 +66,12 @@
       <div class="flex flex-wrap gap-1.5 mb-5" id="pillsPeriodoDash"></div>
 
       <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Ventas del período</div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">💰 Facturación</div><div class="text-2xl font-bold" id="kFacturacion">—</div><div class="text-xs mt-1" id="kFacturacionDelta"></div></div>
         <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">🛒 Pedidos</div><div class="text-2xl font-bold" id="kPedidos">—</div><div class="text-xs mt-1" id="kPedidosDelta"></div></div>
         <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">🏷️ Ticket promedio</div><div class="text-2xl font-bold" id="kTicket">—</div></div>
         <div class="card p-5"><div class="text-xs font-semibold text-slate-500 mb-2">📦 Unidades vendidas</div><div class="text-2xl font-bold" id="kUnidades">—</div></div>
+        <div class="card p-5 border-indigo-200 bg-indigo-50"><div class="text-xs font-semibold text-indigo-500 mb-2">🏆 Categoría estrella</div><div class="text-lg font-bold text-indigo-700" id="kCategoriaTop">—</div><div class="text-xs mt-1 text-indigo-500" id="kCategoriaTopSub"></div></div>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
@@ -88,7 +89,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="card p-5">
           <div class="font-bold text-sm mb-3">🗂️ Por categoría</div>
           <div id="miniCategorias" class="space-y-2 text-sm"></div>
@@ -96,6 +97,10 @@
         <div class="card p-5">
           <div class="font-bold text-sm mb-3">📐 Por talle</div>
           <div id="miniTalles" class="space-y-2 text-sm"></div>
+        </div>
+        <div class="card p-5">
+          <div class="font-bold text-sm mb-3">🏷️ Por tag / enfoque</div>
+          <div id="miniTags" class="space-y-2 text-sm"></div>
         </div>
       </div>
     </div>
@@ -178,6 +183,7 @@
             <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
               <th class="py-2.5 px-4">#</th>
               <th class="py-2.5 px-4">Producto</th>
+              <th class="py-2.5 px-4">Color que más sale</th>
               <th class="py-2.5 px-4 text-right">Unidades</th>
               <th class="py-2.5 px-4 text-right">Pedidos</th>
               <th class="py-2.5 px-4 text-right">Última venta</th>
@@ -345,9 +351,21 @@
     document.getElementById("miniCategorias").innerHTML = cats.slice(0, 6).map((c, i) => `
       <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${c.categoria}</span><span class="font-bold text-indigo-600">${fmtNum(c.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
 
+    if (cats.length) {
+      document.getElementById("kCategoriaTop").textContent = cats[0].categoria;
+      document.getElementById("kCategoriaTopSub").textContent = `${fmtNum(cats[0].unidades)} u. · ${fmtMoney(cats[0].facturacion)}`;
+    } else {
+      document.getElementById("kCategoriaTop").textContent = "—";
+      document.getElementById("kCategoriaTopSub").textContent = "";
+    }
+
     const talles = (data.porTallePorPeriodo || {})[periodoDash] || [];
     document.getElementById("miniTalles").innerHTML = talles.slice(0, 6).map((t, i) => `
       <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${t.talle}</span><span class="font-bold text-indigo-600">${fmtNum(t.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    const tags = (data.porTagPorPeriodo || {})[periodoDash] || [];
+    document.getElementById("miniTags").innerHTML = tags.slice(0, 6).map((t, i) => `
+      <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${t.tag}</span><span class="font-bold text-indigo-600">${fmtNum(t.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin tags cargados en los productos.</div>';
   }
 
   // ---------------- Stock general ----------------
@@ -416,12 +434,14 @@
     document.getElementById("ultimasLista").innerHTML = productos.slice(0, 100).map(({ p, dias, vendidas }) => {
       const diasDelPeriodo = (data.periodosDias || {})[periodoUltimas] || 30;
       const ritmo = (vendidas / diasDelPeriodo).toFixed(1);
+      const v = p.ventasPorPeriodo[periodoUltimas];
+      const colorTop = v?.colorMasVendido ? `· repone <b>${v.colorMasVendido.color}</b> (${fmtNum(v.colorMasVendido.unidades)} vendidas)` : "";
       return `
       <div class="card p-4 flex items-center gap-4 ${dias <= 15 ? "border-amber-300" : ""}">
         <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
         <div class="flex-1 min-w-0">
           <div class="font-bold text-sm mb-1">${p.producto}</div>
-          <div class="text-xs text-slate-500"><b>${fmtNum(p.stockTotal)}</b> stock · <b>${fmtNum(vendidas)}</b> vendidas · ${ritmo}/día</div>
+          <div class="text-xs text-slate-500"><b>${fmtNum(p.stockTotal)}</b> stock · <b>${fmtNum(vendidas)}</b> vendidas · ${ritmo}/día ${colorTop}</div>
           <div class="mt-1"><span class="chip chip-amber">~${Math.round(dias)} días</span></div>
         </div>
       </div>`;
@@ -444,15 +464,17 @@
 
     document.getElementById("vendidosTabla").innerHTML = productos.slice(0, 100).map((p, i) => {
       const v = p.ventasPorPeriodo[periodoVendidos];
+      const colorTop = v.colorMasVendido ? `${v.colorMasVendido.color} (${fmtNum(v.colorMasVendido.unidades)} u.)` : "—";
       return `
       <tr class="border-b border-slate-50">
         <td class="py-2.5 px-4 text-slate-400">${i + 1}</td>
         <td class="py-2.5 px-4 font-semibold">${p.producto}</td>
+        <td class="py-2.5 px-4 text-slate-500">${colorTop}</td>
         <td class="py-2.5 px-4 text-right font-bold text-indigo-600">${vendidosCriterio === "facturacion" ? fmtMoney(v.facturacion) : fmtNum(v.unidades)}</td>
         <td class="py-2.5 px-4 text-right">${fmtNum(v.pedidos)}</td>
         <td class="py-2.5 px-4 text-right text-slate-400">${fmtFecha(p.ventasTotales.ultimaVenta)}</td>
       </tr>`;
-    }).join("") || '<tr><td colspan="5" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
+    }).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
   }
 
   // ---------------- Productos nuevos ----------------
@@ -521,6 +543,7 @@
           <div class="font-bold text-sm">${p.producto}</div>
           <div class="text-xs text-slate-400 mt-0.5">${p.categoria} ${p.publicado ? '· <span class="text-green-600 font-semibold">Publicado</span>' : '· <span class="text-slate-400">Oculto</span>'}</div>
           <div class="text-xs text-slate-400 mt-0.5">Última venta: ${fmtFecha(p.ventasTotales.ultimaVenta)}</div>
+          ${p.colorMasStock ? `<div class="text-xs text-amber-600 font-semibold mt-1">Más stock en: ${p.colorMasStock.color} (${fmtNum(p.colorMasStock.stock)} u.)</div>` : ""}
         </div>
         <div class="text-right flex-shrink-0"><div class="text-lg font-bold">${fmtNum(p.stockTotal)}</div><div class="text-xs text-slate-400">unid.</div></div>
       </div>`).join("") || '<div class="text-slate-400 text-sm p-4">Ningún producto coincide con el filtro.</div>';
