@@ -261,14 +261,20 @@ function construirVentasPorProducto(orders, periods, variantMeta) {
     if (!ventas.has(productId)) {
       const porPeriodo = {};
       const colorPorPeriodo = {};
+      const tallePorPeriodo = {};
+      const variantePorPeriodo = {};
       Object.keys(periods).forEach((k) => {
         porPeriodo[k] = { unidades: 0, facturacion: 0, pedidoIds: new Set() };
-        colorPorPeriodo[k] = new Map(); // color -> unidades
+        colorPorPeriodo[k] = new Map(); // color -> { color, unidades, facturacion }
+        tallePorPeriodo[k] = new Map(); // talle -> { talle, unidades, facturacion }
+        variantePorPeriodo[k] = new Map(); // "color / talle" -> { color, talle, variante, unidades, facturacion }
       });
       ventas.set(productId, {
         alltime: { unidades: 0, facturacion: 0, pedidoIds: new Set(), ultimaVenta: null },
         porPeriodo,
         colorPorPeriodo,
+        tallePorPeriodo,
+        variantePorPeriodo,
       });
     }
     return ventas.get(productId);
@@ -281,7 +287,9 @@ function construirVentasPorProducto(orders, periods, variantMeta) {
       const entry = getEntry(li.product_id);
       const unidades = Number(li.quantity || 0);
       const facturacion = Number(li.price || 0) * unidades;
-      const color = variantMeta.get(li.variant_id)?.color || null;
+      const meta = variantMeta.get(li.variant_id) || {};
+      const color = meta.color || null;
+      const talle = meta.talle || null;
 
       entry.alltime.unidades += unidades;
       entry.alltime.facturacion += facturacion;
@@ -295,10 +303,27 @@ function construirVentasPorProducto(orders, periods, variantMeta) {
           entry.porPeriodo[key].unidades += unidades;
           entry.porPeriodo[key].facturacion += facturacion;
           entry.porPeriodo[key].pedidoIds.add(o.id);
+
           if (color) {
-            const mapa = entry.colorPorPeriodo[key];
-            mapa.set(color, (mapa.get(color) || 0) + unidades);
+            const cMap = entry.colorPorPeriodo[key];
+            const cPrev = cMap.get(color) || { color, unidades: 0, facturacion: 0 };
+            cPrev.unidades += unidades;
+            cPrev.facturacion += facturacion;
+            cMap.set(color, cPrev);
           }
+          if (talle) {
+            const tMap = entry.tallePorPeriodo[key];
+            const tPrev = tMap.get(talle) || { talle, unidades: 0, facturacion: 0 };
+            tPrev.unidades += unidades;
+            tPrev.facturacion += facturacion;
+            tMap.set(talle, tPrev);
+          }
+          const vKey = `${color || "Sin color"} / ${talle || "Sin talle"}`;
+          const vMap = entry.variantePorPeriodo[key];
+          const vPrev = vMap.get(vKey) || { color: color || "Sin color", talle: talle || "Sin talle", variante: vKey, unidades: 0, facturacion: 0 };
+          vPrev.unidades += unidades;
+          vPrev.facturacion += facturacion;
+          vMap.set(vKey, vPrev);
         }
       });
     });
@@ -356,14 +381,22 @@ function serializarProductos(products, ventasPorProducto, periods) {
     Object.keys(periods).forEach((key) => {
       const v = ventas ? ventas.porPeriodo[key] : null;
       const colorMap = ventas ? ventas.colorPorPeriodo[key] : new Map();
-      const coloresVendidos = Array.from(colorMap.entries())
-        .map(([color, unidades]) => ({ color, unidades }))
-        .sort((a, b) => b.unidades - a.unidades);
+      const talleMap = ventas ? ventas.tallePorPeriodo[key] : new Map();
+      const varianteMap = ventas ? ventas.variantePorPeriodo[key] : new Map();
+
+      const coloresVendidos = Array.from(colorMap.values()).sort((a, b) => b.unidades - a.unidades);
+      const tallesVendidos = Array.from(talleMap.values()).sort((a, b) => b.unidades - a.unidades);
+      const variantesVendidas = Array.from(varianteMap.values()).sort((a, b) => b.unidades - a.unidades);
+
       ventasPorPeriodo[key] = {
         unidades: v ? v.unidades : 0,
         facturacion: v ? v.facturacion : 0,
         pedidos: v ? v.pedidoIds.size : 0,
         colorMasVendido: coloresVendidos.length ? coloresVendidos[0] : null,
+        talleMasVendido: tallesVendidos.length ? tallesVendidos[0] : null,
+        coloresVendidos,
+        tallesVendidos,
+        variantesVendidas,
       };
     });
 
