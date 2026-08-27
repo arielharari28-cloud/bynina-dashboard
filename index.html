@@ -428,6 +428,7 @@
 
   // ---------------- Stock general ----------------
   function renderStock() {
+    llenarSelectCategorias("stockCategoria", stockCategoria);
     let productos = [...(data.productos || [])];
     if (!stockOcultos) productos = productos.filter(p => p.publicado);
     if (stockCategoria) productos = productos.filter(p => productoEnCategoria(p, stockCategoria));
