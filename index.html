@@ -664,14 +664,6 @@
   function normalizar(s) {
     return (s || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   }
-  function buscarCol(row, candidatos) {
-    const keys = Object.keys(row);
-    for (const k of keys) {
-      const nk = normalizar(k);
-      if (candidatos.some(c => nk.includes(c))) return k;
-    }
-    return null;
-  }
 
   let objetivosExcelParseado = null;
 
@@ -683,23 +675,30 @@
       try {
         const wb = XLSX.read(ev.target.result, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
-        const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-        if (!rows.length) throw new Error("El Excel no tiene filas.");
+        // El export de Ninox ("Ganancia por Artículos") trae una fila de título arriba del
+        // encabezado real (Código/Descripción/Cantidad/...), así que hay que buscar en qué
+        // fila está el encabezado de verdad antes de armar los objetos.
+        const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        const headerIdx = raw.findIndex(row => row.some(c => normalizar(c) === "codigo") && row.some(c => normalizar(c).includes("cantidad")));
+        if (headerIdx === -1) throw new Error("No encontré la fila de encabezado (Código/Cantidad). ¿Es el export de \"Ganancia por Artículos\" de Ninox?");
+        const header = raw[headerIdx];
+        const dataRows = raw.slice(headerIdx + 1).filter(row => row.some(c => c !== ""));
+        if (!dataRows.length) throw new Error("No hay filas de datos debajo del encabezado.");
 
-        const colCant = buscarCol(rows[0], ["cantidad"]);
-        const colTotal = buscarCol(rows[0], ["total"]);
-        if (!colCant || !colTotal) throw new Error("No encontré las columnas Cantidad / Total. Revisá el encabezado.");
+        const idxCant = header.findIndex(h => normalizar(h).includes("cantidad"));
+        const idxVentaTotal = header.findIndex(h => normalizar(h) === "venta total");
+        if (idxCant === -1 || idxVentaTotal === -1) throw new Error("No encontré las columnas Cantidad / Venta Total. Revisá el encabezado.");
 
         let facturacion = 0, unidades = 0;
-        rows.forEach(r => {
-          unidades += parseNumAR(r[colCant]);
-          facturacion += parseNumAR(r[colTotal]);
+        dataRows.forEach(r => {
+          unidades += parseNumAR(r[idxCant]);
+          facturacion += parseNumAR(r[idxVentaTotal]);
         });
 
         objetivosExcelParseado = { facturacion, unidades };
         document.getElementById("objetivosExcelPreview").className = "mt-3 border border-slate-200 rounded-lg p-3 bg-slate-50";
         document.getElementById("objetivosExcelPreview").innerHTML = `
-          <div class="text-sm font-bold mb-3">${rows.length} filas leídas · Total ${fmtMoney(facturacion)} · ${fmtNum(unidades)} unid.</div>
+          <div class="text-sm font-bold mb-3">${dataRows.length} artículos leídos · Venta Total ${fmtMoney(facturacion)} · ${fmtNum(unidades)} unid.</div>
           <button id="objetivosExcelConfirmar" class="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar y guardar en esta semana</button>
         `;
         document.getElementById("objetivosExcelConfirmar").addEventListener("click", () => {
