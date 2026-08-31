@@ -451,7 +451,7 @@ async function main() {
   const porTagPorPeriodo = {};
   Object.entries(periods).forEach(([key, { desde, hasta }]) => {
     kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta);
-    porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta);
+    porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta, 30);
     porTallePorPeriodo[key] = calcularPorTalle(orders, desde, hasta, variantMeta);
     porTagPorPeriodo[key] = calcularPorTag(orders, desde, hasta, productTags);
   });
