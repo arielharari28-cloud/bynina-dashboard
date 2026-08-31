@@ -293,10 +293,17 @@
       <div id="objetivosCards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
 
       <div class="card p-5" id="objetivosLocalCarga">
-        <div class="font-bold text-sm mb-1">📄 Subir Excel de Ninox — semana actual</div>
-        <p class="text-xs text-slate-500 mb-3">Filtrá el período en Ninox antes de exportar (una semana). Suma sola las columnas Cantidad y Total.</p>
-        <input type="file" id="objetivosExcelInput" accept=".xlsx,.xls" class="text-sm mb-2" />
-        <div id="objetivosExcelPreview" class="hidden mt-3"></div>
+        <div class="font-bold text-sm mb-1">🗓️ ¿Qué semana estás cargando?</div>
+        <p class="text-xs text-slate-500 mb-2">Elegí el lunes de la semana del Excel que vas a subir (por defecto, la semana actual). Podés volver para atrás y cargar semanas pasadas de agosto una por una.</p>
+        <input type="date" id="objetivosSemanaCarga" class="border border-slate-200 rounded-lg px-3 py-2 text-sm mb-1" onchange="renderSemanaCargaEstado()" />
+        <div id="objetivosSemanaCargaEstado" class="text-xs text-slate-400 mb-3"></div>
+
+        <div class="border-t border-slate-100 pt-4">
+          <div class="font-bold text-sm mb-1">📄 Subir Excel de Ninox</div>
+          <p class="text-xs text-slate-500 mb-3">Filtrá ese período en Ninox antes de exportar (una semana). Suma sola las columnas Cantidad y Venta Total.</p>
+          <input type="file" id="objetivosExcelInput" accept=".xlsx,.xls" class="text-sm mb-2" />
+          <div id="objetivosExcelPreview" class="hidden mt-3"></div>
+        </div>
 
         <div class="border-t border-slate-100 mt-5 pt-4">
           <div class="text-xs font-semibold text-slate-500 mb-2">O cargar el total a mano</div>
@@ -314,20 +321,30 @@
           <span id="objetivosLocalGuardadoMsg" class="text-xs text-green-600 font-semibold ml-3"></span>
         </div>
       </div>
+
+      <div class="card p-5 mt-4" id="objetivosSemanasResumen"></div>
     </div>
 
     <!-- ===================== GANADORES ===================== -->
     <div class="view" data-view="ganadores">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏅 Productos ganadores</h1>
       <p class="text-sm text-slate-500 mt-1 mb-1" id="ganadoresDesc"></p>
-      <p class="text-xs text-slate-400 mb-4">Cortado = suma de lo cortado en Fábrica en el período, para los artículos cuyo código de Fábrica coincide con el inicio del SKU de Tiendanube. Si no hay match, esa línea no se muestra (no significa que no se cortó nada).</p>
+      <p class="text-xs text-slate-400 mb-4">Cortado = suma de lo cortado en Fábrica en el período, para los artículos cuyo código de Fábrica coincide con el inicio del SKU de Tiendanube. Si no hay match, esa línea no se muestra (no significa que no se cortó nada). Tocá una tarjeta para ver colores y talles.</p>
 
-      <div class="flex gap-1.5 mb-5" id="ganadoresPeriodo">
-        <button class="pill active" data-periodo="mensual">Este mes</button>
-        <button class="pill" data-periodo="quincena">Última quincena</button>
+      <div class="flex flex-wrap items-center gap-2 mb-5">
+        <div class="flex gap-1.5" id="ganadoresPeriodo">
+          <button class="pill active" data-periodo="mensual">Este mes</button>
+          <button class="pill" data-periodo="quincena">Última quincena</button>
+        </div>
+        <select id="ganadoresCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"></select>
+        <div class="flex gap-1.5" id="ganadoresOrdenModo">
+          <button class="pill active" data-modo="auto">Automático</button>
+          <button class="pill" data-modo="manual">✋ Mi orden</button>
+        </div>
+        <span class="text-xs text-slate-400" id="ganadoresOrdenHint"></span>
       </div>
 
-      <div id="ganadoresGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+      <div id="ganadoresGrid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
     </div>
 
     <!-- ===================== MODAL REPOSICIÓN ===================== -->
@@ -427,6 +444,41 @@
   }
   function weekKey(d) { return mondayOfWeek(d).toISOString().slice(0, 10); }
   function semanaActualKey() { return weekKey(new Date()); }
+  // Semana que está seleccionada en el selector de carga del Local (por defecto, la actual).
+  // Siempre se normaliza al lunes de esa semana, sea cual sea el día que se haya elegido.
+  function semanaCargaKey() {
+    const v = document.getElementById("objetivosSemanaCarga")?.value;
+    return v ? weekKey(new Date(v + "T00:00:00")) : semanaActualKey();
+  }
+  function renderSemanaCargaEstado() {
+    const key = semanaCargaKey();
+    const s = (objetivosLocal.semanas || {})[key];
+    const el = document.getElementById("objetivosSemanaCargaEstado");
+    const lunes = new Date(key + "T00:00:00");
+    const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
+    const opts = { day: "numeric", month: "short" };
+    const rango = `${lunes.toLocaleDateString("es-AR", opts)} – ${domingo.toLocaleDateString("es-AR", opts)}`;
+    el.textContent = s
+      ? `Semana ${rango}: ya tiene ${fmtMoney(s.facturacion || 0)} · ${fmtNum(s.unidades || 0)} u. cargados — subir/guardar de nuevo lo reemplaza.`
+      : `Semana ${rango}: todavía sin datos cargados.`;
+    renderSemanasResumen();
+  }
+  function renderSemanasResumen() {
+    const cont = document.getElementById("objetivosSemanasResumen");
+    if (!cont) return;
+    const semanas = objetivosLocal.semanas || {};
+    const keys = Object.keys(semanas).sort().reverse();
+    if (!keys.length) { cont.innerHTML = '<div class="text-xs text-slate-400">Todavía no cargaste ninguna semana del local.</div>'; return; }
+    const opts = { day: "numeric", month: "short" };
+    cont.innerHTML = `<div class="text-xs font-semibold text-slate-500 mb-2">Semanas cargadas del local</div>` + keys.map(key => {
+      const s = semanas[key];
+      const lunes = new Date(key + "T00:00:00");
+      return `<div class="flex justify-between text-xs py-1 border-b border-slate-50 last:border-0">
+        <span class="text-slate-500">Semana del ${lunes.toLocaleDateString("es-AR", opts)}</span>
+        <span><b>${fmtMoney(s.facturacion || 0)}</b> · ${fmtNum(s.unidades || 0)} u.</span>
+      </div>`;
+    }).join("");
+  }
 
   // ---- rango custom: helpers de fechas en formato "YYYY-MM-DD" ----
   function diasEntre(desdeStr, hastaStr) {
@@ -640,10 +692,11 @@
   document.getElementById("objetivosLocalGuardar").addEventListener("click", () => {
     const fact = Number(document.getElementById("objetivosLocalFact").value || 0);
     const unid = Number(document.getElementById("objetivosLocalUnid").value || 0);
-    const key = semanaActualKey();
+    const key = semanaCargaKey();
     db.ref(`dashboard_objetivos/local/semanas/${key}`).update({ facturacion: fact, unidades: unid }).then(() => {
       const msg = document.getElementById("objetivosLocalGuardadoMsg");
       msg.textContent = "✓ Guardado";
+      renderSemanaCargaEstado();
       setTimeout(() => { msg.textContent = ""; }, 2500);
     });
   });
@@ -651,7 +704,11 @@
   db.ref("dashboard_objetivos/local").on("value", snap => {
     objetivosLocal = snap.val() || {};
     if (data) renderObjetivos();
+    if (document.getElementById("objetivosSemanaCarga")) renderSemanaCargaEstado();
   });
+
+  // Precarga el selector de "qué semana estás cargando" con el lunes de esta semana.
+  { const elSemanaCarga = document.getElementById("objetivosSemanaCarga"); if (elSemanaCarga && !elSemanaCarga.value) elSemanaCarga.value = semanaActualKey(); }
 
   // ---------------- Objetivos: importar Excel de Ninox ----------------
   function parseNumAR(v) {
@@ -697,14 +754,17 @@
 
         objetivosExcelParseado = { facturacion, unidades };
         document.getElementById("objetivosExcelPreview").className = "mt-3 border border-slate-200 rounded-lg p-3 bg-slate-50";
+        const lunesSel = new Date(semanaCargaKey() + "T00:00:00");
         document.getElementById("objetivosExcelPreview").innerHTML = `
           <div class="text-sm font-bold mb-3">${dataRows.length} artículos leídos · Venta Total ${fmtMoney(facturacion)} · ${fmtNum(unidades)} unid.</div>
-          <button id="objetivosExcelConfirmar" class="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar y guardar en esta semana</button>
+          <div class="text-xs text-slate-500 mb-3">Se va a guardar en la semana del <b>${lunesSel.toLocaleDateString("es-AR", { day: "numeric", month: "short" })}</b> (la que elegiste arriba).</div>
+          <button id="objetivosExcelConfirmar" class="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar y guardar en esa semana</button>
         `;
         document.getElementById("objetivosExcelConfirmar").addEventListener("click", () => {
-          const key = semanaActualKey();
+          const key = semanaCargaKey();
           db.ref(`dashboard_objetivos/local/semanas/${key}`).update(objetivosExcelParseado).then(() => {
             document.getElementById("objetivosExcelPreview").innerHTML += '<div class="text-xs text-green-600 font-semibold mt-2">✓ Guardado</div>';
+            renderSemanaCargaEstado();
           });
         });
       } catch (err) {
@@ -1373,6 +1433,9 @@
 
   // ---------------- Ganadores (pestaña con foto + cortado vs. período) ----------------
   let ganadoresPeriodo = "mensual";
+  let ganadoresCategoria = "";
+  let ganadoresOrdenModo = "auto"; // "auto" (por unidades vendidas) o "manual" (drag and drop)
+  let ganadoresOrdenManual = []; // array de product ids, en el orden que armó Ariel
   let fabricaSectionsCache = null; // se carga una sola vez por sesión y se reusa
 
   async function getFabricaSectionsCache() {
@@ -1414,41 +1477,108 @@
     return matcheo ? total : null;
   }
 
-  async function renderGanadoresTab() {
-    if (!data) return;
-    document.getElementById("ganadoresPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === ganadoresPeriodo));
-    const periodoVentas = ganadoresPeriodo === "quincena" ? "15dias" : "estemes";
+  // Fuente única de "cuáles son los ganadores ahora" (antes de ordenar/filtrar) — la reusan
+  // tanto el cálculo de promedio como el filtro de categoría y el orden manual.
+  function calcularGanadoresBase(periodoVentas) {
     const productos = (data.productos || []).filter(p => p.ventasPorPeriodo && p.ventasPorPeriodo[periodoVentas]);
     const valores = productos.map(p => p.ventasPorPeriodo[periodoVentas]?.unidades || 0);
     const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
-    const ganadores = productos
-      .filter(p => (p.ventasPorPeriodo[periodoVentas]?.unidades || 0) > promedio)
-      .sort((a, b) => (b.ventasPorPeriodo[periodoVentas]?.unidades || 0) - (a.ventasPorPeriodo[periodoVentas]?.unidades || 0));
+    const ganadores = productos.filter(p => (p.ventasPorPeriodo[periodoVentas]?.unidades || 0) > promedio);
+    return { productos, promedio, ganadores };
+  }
+
+  async function renderGanadoresTab() {
+    if (!data) return;
+    document.getElementById("ganadoresPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === ganadoresPeriodo));
+    document.getElementById("ganadoresOrdenModo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.modo === ganadoresOrdenModo));
+    document.getElementById("ganadoresOrdenHint").textContent = ganadoresOrdenModo === "manual" ? "Arrastrá las tarjetas para reordenar." : "";
+
+    const periodoVentas = ganadoresPeriodo === "quincena" ? "15dias" : "estemes";
+    const { productos, promedio, ganadores: ganadoresTodos } = calcularGanadoresBase(periodoVentas);
+
+    // Selector de categoría: se arma con las categorías presentes entre los ganadores del período.
+    const categorias = Array.from(new Set(ganadoresTodos.map(p => p.categoria || "Sin categoría"))).sort();
+    const selCat = document.getElementById("ganadoresCategoria");
+    const catPrevia = ganadoresCategoria;
+    selCat.innerHTML = `<option value="">Todas las categorías</option>` + categorias.map(c => `<option value="${c}">${c}</option>`).join("");
+    selCat.value = categorias.includes(catPrevia) ? catPrevia : "";
+    ganadoresCategoria = selCat.value;
+
+    let ganadores = ganadoresCategoria ? ganadoresTodos.filter(p => (p.categoria || "Sin categoría") === ganadoresCategoria) : ganadoresTodos;
+
+    if (ganadoresOrdenModo === "manual") {
+      const idsSet = new Set(ganadores.map(p => p.id));
+      const enOrden = ganadoresOrdenManual.filter(id => idsSet.has(id));
+      const sinOrden = ganadores.filter(p => !ganadoresOrdenManual.includes(p.id));
+      const porId = new Map(ganadores.map(p => [p.id, p]));
+      ganadores = [...enOrden.map(id => porId.get(id)), ...sinOrden];
+    } else {
+      ganadores.sort((a, b) => (b.ventasPorPeriodo[periodoVentas]?.unidades || 0) - (a.ventasPorPeriodo[periodoVentas]?.unidades || 0));
+    }
 
     document.getElementById("ganadoresDesc").textContent = productos.length
-      ? `${ganadores.length} de ${productos.length} productos venden por encima del promedio (${fmtNum(promedio)} u.) — ${ganadoresPeriodo === "quincena" ? "últimos 15 días" : "este mes"}.`
+      ? `${ganadoresTodos.length} de ${productos.length} productos venden por encima del promedio (${fmtNum(promedio)} u.) — ${ganadoresPeriodo === "quincena" ? "últimos 15 días" : "este mes"}.${ganadoresCategoria ? ` Mostrando "${ganadoresCategoria}" (${ganadores.length}).` : ""}`
       : "Sin ventas en este período.";
 
     const grid = document.getElementById("ganadoresGrid");
-    grid.innerHTML = ganadores.slice(0, 24).map(p => `
-      <div class="card overflow-hidden" data-ganador-id="${p.id}">
-        <img src="${p.imagen || ""}" class="w-full h-40 object-cover bg-slate-100" onerror="this.style.visibility='hidden'" />
-        <div class="p-3.5">
-          <div class="font-bold text-sm text-slate-800 truncate">${p.producto}</div>
-          <div class="text-xs text-slate-500 mt-1">${fmtNum(p.ventasPorPeriodo[periodoVentas]?.unidades || 0)} vendidas</div>
-          <div class="text-xs text-slate-400 mt-0.5 ganador-cortado">Buscando cuánto se cortó…</div>
+    grid.innerHTML = ganadores.slice(0, 40).map(p => `
+      <div class="card overflow-hidden cursor-pointer hover:shadow-md transition-shadow" data-ganador-id="${p.id}" ${ganadoresOrdenModo === "manual" ? 'draggable="true"' : ""} onclick="if(!ganadoresArrastrando) abrirReposicion('${p.id}')">
+        <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100" onerror="this.style.visibility='hidden'" />
+        <div class="p-2.5">
+          <div class="font-semibold text-xs text-slate-800 leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
+          <div class="text-[11px] text-slate-500 mt-1">${fmtNum(p.ventasPorPeriodo[periodoVentas]?.unidades || 0)} vendidas</div>
+          <div class="text-[11px] text-slate-400 ganador-cortado">·</div>
         </div>
-      </div>`).join("") || '<div class="text-slate-400 text-sm col-span-3">Ningún producto supera el promedio todavía.</div>';
+      </div>`).join("") || '<div class="text-slate-400 text-sm col-span-full">Ningún producto supera el promedio todavía.</div>';
+
+    if (ganadoresOrdenModo === "manual") activarDragGanadores(grid);
 
     // El cruce con Fábrica es async (lee otro proyecto/nodo Firebase) — se resuelve por
     // separado para no bloquear el render inicial de las tarjetas.
-    ganadores.slice(0, 24).forEach(async p => {
+    ganadores.slice(0, 40).forEach(async p => {
       const cortado = await cortadoPorProducto(p, ganadoresPeriodo);
       const el = grid.querySelector(`[data-ganador-id="${p.id}"] .ganador-cortado`);
       if (!el) return;
       el.textContent = cortado === null ? "" : `✂️ ${fmtNum(cortado)} cortadas`;
     });
   }
+
+  // ---- Drag and drop para "Mi orden" ----
+  let ganadoresArrastrando = false;
+  function activarDragGanadores(grid) {
+    let dragEl = null;
+    grid.querySelectorAll("[data-ganador-id]").forEach(card => {
+      card.addEventListener("dragstart", () => { dragEl = card; ganadoresArrastrando = true; card.style.opacity = "0.4"; });
+      card.addEventListener("dragend", () => {
+        card.style.opacity = "1";
+        setTimeout(() => { ganadoresArrastrando = false; }, 50); // evita que el click posterior al soltar abra el modal
+        guardarOrdenManualGanadores(grid);
+      });
+      card.addEventListener("dragover", e => {
+        e.preventDefault();
+        if (!dragEl || dragEl === card) return;
+        const rect = card.getBoundingClientRect();
+        const after = (e.clientX - rect.left) > rect.width / 2;
+        card.parentNode.insertBefore(dragEl, after ? card.nextSibling : card);
+      });
+    });
+  }
+  function guardarOrdenManualGanadores(grid) {
+    ganadoresOrdenManual = Array.from(grid.querySelectorAll("[data-ganador-id]")).map(el => el.dataset.ganadorId);
+    db.ref("dashboard_ganadores_orden").set(ganadoresOrdenManual);
+  }
+  db.ref("dashboard_ganadores_orden").on("value", snap => {
+    ganadoresOrdenManual = snap.val() || [];
+    if (data && ganadoresOrdenModo === "manual") renderGanadoresTab();
+  });
+
+  document.getElementById("ganadoresCategoria").addEventListener("change", e => {
+    ganadoresCategoria = e.target.value; renderGanadoresTab();
+  });
+  document.getElementById("ganadoresOrdenModo").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    ganadoresOrdenModo = btn.dataset.modo; renderGanadoresTab();
+  });
   document.getElementById("ganadoresPeriodo").addEventListener("click", e => {
     const btn = e.target.closest("button"); if (!btn) return;
     ganadoresPeriodo = btn.dataset.periodo; renderGanadoresTab();
