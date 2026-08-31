@@ -43,6 +43,7 @@
     <div class="navitem" data-view="nuevos">✨ Productos nuevos</div>
     <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
+    <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
   </nav>
   <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">Datos vía Tienda Nube</div>
 </aside>
@@ -318,6 +319,20 @@
       </div>
     </div>
 
+    <!-- ===================== GANADORES ===================== -->
+    <div class="view" data-view="ganadores">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏅 Productos ganadores</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-1" id="ganadoresDesc"></p>
+      <p class="text-xs text-slate-400 mb-4">Cortado = suma de lo cortado en Fábrica en el período, para los artículos cuyo código de Fábrica coincide con el inicio del SKU de Tiendanube. Si no hay match, esa línea no se muestra (no significa que no se cortó nada).</p>
+
+      <div class="flex gap-1.5 mb-5" id="ganadoresPeriodo">
+        <button class="pill active" data-periodo="mensual">Este mes</button>
+        <button class="pill" data-periodo="quincena">Última quincena</button>
+      </div>
+
+      <div id="ganadoresGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+    </div>
+
     <!-- ===================== MODAL REPOSICIÓN ===================== -->
     <div id="modalReposicion" class="hidden fixed inset-0 bg-black/40 items-center justify-center z-50 p-4" onclick="if(event.target===this) cerrarReposicion();">
       <div class="bg-white rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6">
@@ -328,7 +343,11 @@
           </div>
           <button class="text-slate-400 hover:text-slate-700 text-2xl leading-none flex-shrink-0" onclick="cerrarReposicion()">&times;</button>
         </div>
-        <p class="text-xs text-slate-400 mt-1 mb-4">Prioridad calculada según stock actual vs. velocidad de venta en el período elegido.</p>
+        <div class="flex items-center justify-between gap-3 mb-1">
+          <p class="text-xs text-slate-400 mt-1 mb-0">Prioridad calculada según stock actual vs. velocidad de venta en el período elegido.</p>
+          <button id="btnMandarFabrica" class="px-3 py-1.5 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex-shrink-0 whitespace-nowrap" onclick="mandarReposicionAFabrica()">🧵 Mandar corte a Fábrica</button>
+        </div>
+        <div id="reposicionFabricaEstado" class="text-xs mb-3"></div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
           <div class="card p-4">
@@ -1054,9 +1073,12 @@
     return arr;
   }
 
+  let reposicionProductoActivo = null;
+
   function abrirReposicion(productId) {
     const p = (data.productos || []).find(x => String(x.id) === String(productId));
     if (!p) return;
+    reposicionProductoActivo = p;
     const periodo = periodoVendidos;
     const filas = calcularReposicion(p, periodo);
     const porColor = agruparReposicion(filas, "color", periodo);
@@ -1082,10 +1104,98 @@
     reposicionOrdenCampo = "prioridad";
     reposicionOrdenDir = "asc";
     renderReposicionTabla();
+    document.getElementById("reposicionFabricaEstado").textContent = "";
+    document.getElementById("btnMandarFabrica").disabled = false;
+    verificarCorteFabricaExistente(p);
 
     const modal = document.getElementById("modalReposicion");
     modal.classList.remove("hidden");
     modal.classList.add("flex");
+  }
+
+  // ---------------- Mandar a Fábrica (corte de reposición) ----------------
+  // Escribe directo en el mismo proyecto de Firebase que usa la app de Fábrica
+  // (bynina-c1eec, path fabrica_v5/), en la sección "Pendiente armar tizada" —
+  // se saltea Moldería/Nuevos Desarrollos porque el artículo ya existe y ya
+  // tiene molde aprobado. El código de Fábrica no se auto-completa (no hay
+  // forma confiable de derivarlo del SKU de Tiendanube) — queda marcado para
+  // que Peque/Ariel lo complete apenas lo abren.
+  function coloresAReponerDe(p) {
+    const periodo = periodoVendidos;
+    const filas = calcularReposicion(p, periodo);
+    return agruparReposicion(filas, "color", periodo).filter(g => g.orden === 0 || g.orden === 1);
+  }
+
+  async function getSeccionPendienteTizadaId() {
+    const snap = await db.ref("fabrica_v5/sections").once("value");
+    const sections = snap.val() || {};
+    const found = Object.entries(sections).find(([, s]) => (s.title || "").trim().toLowerCase() === "pendiente armar tizada");
+    return found ? found[0] : null;
+  }
+
+  async function verificarCorteFabricaExistente(p) {
+    const estadoEl = document.getElementById("reposicionFabricaEstado");
+    try {
+      const snap = await db.ref("fabrica_v5/sections").once("value");
+      const sections = snap.val() || {};
+      let encontrado = null;
+      Object.values(sections).forEach(sec => {
+        Object.values(sec.items || {}).forEach(it => {
+          if (it.dashboard_producto_id === p.id && !it.done && !encontrado) encontrado = it;
+        });
+      });
+      if (encontrado) {
+        estadoEl.className = "text-xs mb-3 text-amber-600 font-semibold";
+        estadoEl.textContent = `🧵 Ya hay un corte de este producto en Fábrica (${encontrado.code || "sin código todavía"}).`;
+      } else {
+        estadoEl.className = "text-xs mb-3 text-slate-400";
+        estadoEl.textContent = "";
+      }
+    } catch (e) { /* si falla la lectura, no bloqueamos el flujo normal del modal */ }
+  }
+
+  async function mandarReposicionAFabrica() {
+    const p = reposicionProductoActivo;
+    if (!p) return;
+    const btn = document.getElementById("btnMandarFabrica");
+    const estadoEl = document.getElementById("reposicionFabricaEstado");
+    const colores = coloresAReponerDe(p);
+    if (!colores.length) { alert("Este producto no tiene colores marcados como 'Reponer urgente' o 'Reponer pronto' en el período elegido."); return; }
+
+    btn.disabled = true;
+    btn.textContent = "Enviando...";
+    try {
+      const destId = await getSeccionPendienteTizadaId();
+      if (!destId) { alert('No encontré la sección "Pendiente armar tizada" en Fábrica — revisá que exista con ese nombre exacto.'); btn.disabled = false; btn.textContent = "🧵 Mandar corte a Fábrica"; return; }
+
+      const notaColores = colores.map(c => `${c.color} (${c.prioridad === "Reponer urgente" ? "🔴 urgente, sin stock" : "🟡 pronto"} — ${fmtNum(c.unidades)} vendidas)`).join(" · ");
+      const newItem = {
+        code: "",
+        codigo_pendiente: true,
+        name: p.producto || "",
+        marca: "By Nina",
+        categoria: p.categoria || null,
+        foto: p.imagen || "",
+        base_aprobada: true,
+        origen_reposicion: true,
+        dashboard_producto_id: p.id,
+        colores_reponer: colores.map(c => ({ color: c.color, unidades: c.unidades, prioridad: c.prioridad })),
+        nota: `🔁 Reposición automática desde Dashboard. Colores a priorizar: ${notaColores}. Completar código de Fábrica y curva de talles a mano.`,
+        done: false,
+        avios: {},
+        fecha_ingreso: Date.now(),
+        fecha_etapa: Date.now(),
+      };
+      await db.ref(`fabrica_v5/sections/${destId}/items`).push(newItem);
+      estadoEl.className = "text-xs mb-3 text-green-600 font-semibold";
+      estadoEl.textContent = "✓ Corte enviado a Fábrica — Pendiente armar tizada.";
+      btn.textContent = "✓ Enviado";
+    } catch (e) {
+      estadoEl.className = "text-xs mb-3 text-red-500 font-semibold";
+      estadoEl.textContent = "Error al enviar: " + e.message;
+      btn.disabled = false;
+      btn.textContent = "🧵 Mandar corte a Fábrica";
+    }
   }
 
   // Orden de talles habituales para que "Ordenar por talle" tenga sentido
@@ -1270,8 +1380,91 @@
   }
 
   function renderAll() {
-    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos();
+    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
   }
+
+  // ---------------- Ganadores (pestaña con foto + cortado vs. período) ----------------
+  let ganadoresPeriodo = "mensual";
+  let fabricaSectionsCache = null; // se carga una sola vez por sesión y se reusa
+
+  async function getFabricaSectionsCache() {
+    if (fabricaSectionsCache) return fabricaSectionsCache;
+    try {
+      const snap = await db.ref("fabrica_v5/sections").once("value");
+      fabricaSectionsCache = snap.val() || {};
+    } catch (e) {
+      fabricaSectionsCache = {};
+    }
+    return fabricaSectionsCache;
+  }
+
+  // Suma lo cortado (item.capas → cant por talle, ya congelado en "Marcar cortado") de todos
+  // los ítems de Fábrica cuyo código matchea el inicio de algún SKU de este producto, con
+  // fecha de corte dentro del período elegido. Si no hay match de código, devuelve null.
+  function cortadoDeItem(item) {
+    return Object.values(item.capas || {}).reduce((s, row) => s + Object.values(row.cant || {}).reduce((s2, n) => s2 + (parseInt(n) || 0), 0), 0);
+  }
+  async function cortadoPorProducto(p, periodo) {
+    const sections = await getFabricaSectionsCache();
+    const skus = (p.variantes || []).map(v => (v.sku || "").toUpperCase()).filter(Boolean);
+    if (!skus.length) return null;
+    const dias = periodo === "quincena" ? 15 : 30;
+    const corte = new Date(); corte.setDate(corte.getDate() - dias);
+    let total = 0, matcheo = false;
+    Object.values(sections).forEach(sec => {
+      Object.values(sec.items || {}).forEach(it => {
+        const code = (it.code || "").toUpperCase();
+        if (!code) return;
+        if (!skus.some(s => s.startsWith(code))) return;
+        if (!it.fecha_corte) return;
+        const f = new Date(it.fecha_corte);
+        if (isNaN(f) || f < corte) return;
+        matcheo = true;
+        total += cortadoDeItem(it);
+      });
+    });
+    return matcheo ? total : null;
+  }
+
+  async function renderGanadoresTab() {
+    if (!data) return;
+    document.getElementById("ganadoresPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === ganadoresPeriodo));
+    const periodoVentas = ganadoresPeriodo === "quincena" ? "15dias" : "estemes";
+    const productos = (data.productos || []).filter(p => p.ventasPorPeriodo && p.ventasPorPeriodo[periodoVentas]);
+    const valores = productos.map(p => p.ventasPorPeriodo[periodoVentas]?.unidades || 0);
+    const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
+    const ganadores = productos
+      .filter(p => (p.ventasPorPeriodo[periodoVentas]?.unidades || 0) > promedio)
+      .sort((a, b) => (b.ventasPorPeriodo[periodoVentas]?.unidades || 0) - (a.ventasPorPeriodo[periodoVentas]?.unidades || 0));
+
+    document.getElementById("ganadoresDesc").textContent = productos.length
+      ? `${ganadores.length} de ${productos.length} productos venden por encima del promedio (${fmtNum(promedio)} u.) — ${ganadoresPeriodo === "quincena" ? "últimos 15 días" : "este mes"}.`
+      : "Sin ventas en este período.";
+
+    const grid = document.getElementById("ganadoresGrid");
+    grid.innerHTML = ganadores.slice(0, 24).map(p => `
+      <div class="card overflow-hidden" data-ganador-id="${p.id}">
+        <img src="${p.imagen || ""}" class="w-full h-40 object-cover bg-slate-100" onerror="this.style.visibility='hidden'" />
+        <div class="p-3.5">
+          <div class="font-bold text-sm text-slate-800 truncate">${p.producto}</div>
+          <div class="text-xs text-slate-500 mt-1">${fmtNum(p.ventasPorPeriodo[periodoVentas]?.unidades || 0)} vendidas</div>
+          <div class="text-xs text-slate-400 mt-0.5 ganador-cortado">Buscando cuánto se cortó…</div>
+        </div>
+      </div>`).join("") || '<div class="text-slate-400 text-sm col-span-3">Ningún producto supera el promedio todavía.</div>';
+
+    // El cruce con Fábrica es async (lee otro proyecto/nodo Firebase) — se resuelve por
+    // separado para no bloquear el render inicial de las tarjetas.
+    ganadores.slice(0, 24).forEach(async p => {
+      const cortado = await cortadoPorProducto(p, ganadoresPeriodo);
+      const el = grid.querySelector(`[data-ganador-id="${p.id}"] .ganador-cortado`);
+      if (!el) return;
+      el.textContent = cortado === null ? "" : `✂️ ${fmtNum(cortado)} cortadas`;
+    });
+  }
+  document.getElementById("ganadoresPeriodo").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    ganadoresPeriodo = btn.dataset.periodo; renderGanadoresTab();
+  });
 
   // ---------------- Listeners ----------------
   document.getElementById("stockBuscar").addEventListener("input", e => { stockBuscar = e.target.value; renderStock(); });
