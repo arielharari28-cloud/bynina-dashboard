@@ -184,8 +184,24 @@ function calcularKpisPeriodo(orders, desde, hasta) {
   };
 }
 
-function calcularPorCategoria(orders, desde, hasta, productMeta, top = 8) {
+// Ventas agrupadas por día (fecha Argentina), para permitir sumar cualquier rango custom en el cliente.
+function calcularPorDia(orders, desde, hasta) {
   const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
+  const acc = {};
+  pagados.forEach((o) => {
+    const { y, m, d } = argWallClockParts(new Date(o.created_at));
+    const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const prev = acc[key] || { facturacion: 0, unidades: 0 };
+    (o.products || []).forEach((li) => {
+      prev.unidades += Number(li.quantity || 0);
+      prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
+    });
+    acc[key] = prev;
+  });
+  return acc;
+}
+
+function calcularPorCategoria(orders, desde, hasta, productMeta, top = 8) {  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
   const acc = new Map();
   pagados.forEach((o) => {
     (o.products || []).forEach((li) => {
@@ -459,6 +475,9 @@ async function main() {
   const ventasPorProducto = construirVentasPorProducto(orders, periods, variantMeta);
   const productos = serializarProductos(products, ventasPorProducto, periods);
 
+  // Por día completo (últimos 95 días) — para que el dashboard sume cualquier rango custom que elija Ariel.
+  const porDia = calcularPorDia(orders, startOfDay(daysAgo(95)), endOfDay(new Date()));
+
   const db = initFirebase();
   const payload = {
     actualizado: new Date().toISOString(),
@@ -467,6 +486,7 @@ async function main() {
     porCategoriaPorPeriodo,
     porTallePorPeriodo,
     porTagPorPeriodo,
+    porDia,
     productos,
   };
 
