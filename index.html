@@ -276,14 +276,27 @@
         <div class="flex gap-1.5" id="objetivosPeriodo">
           <button class="pill active" data-periodo="mensual">Mensual</button>
           <button class="pill" data-periodo="semanal">Semanal</button>
+          <button class="pill" data-periodo="custom">Personalizado</button>
         </div>
       </div>
+
+      <div id="objetivosCustomFechas" class="hidden flex items-end gap-3 mb-5 flex-wrap">
+        <div>
+          <label class="text-xs text-slate-500 font-medium block mb-1">Desde</label>
+          <input type="date" id="objetivosCustomDesde" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 font-medium block mb-1">Hasta</label>
+          <input type="date" id="objetivosCustomHasta" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        </div>
+        <button id="objetivosCustomAplicar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">Aplicar</button>
+        <div class="text-xs text-slate-400 max-w-xs">Se compara contra el mismo Nº de días inmediatamente anterior. Local: solo suma semanas cuyo lunes caiga dentro del rango — es aproximado.</div>
 
       <div id="objetivosCards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
 
       <div class="card p-5" id="objetivosLocalCarga">
         <div class="font-bold text-sm mb-1">📄 Subir Excel de Ninox — semana actual</div>
-        <p class="text-xs text-slate-500 mb-3">Filtrá el período en Ninox antes de exportar (una semana). Categoriza solo, por palabra clave en la Descripción.</p>
+        <p class="text-xs text-slate-500 mb-3">Filtrá el período en Ninox antes de exportar (una semana). Suma sola las columnas Cantidad y Total.</p>
         <input type="file" id="objetivosExcelInput" accept=".xlsx,.xls" class="text-sm mb-2" />
         <div id="objetivosExcelPreview" class="hidden mt-3"></div>
 
@@ -364,6 +377,7 @@
 
   let objetivosMetrica = "facturacion", objetivosPeriodo = "mensual";
   let objetivosLocal = {};
+  let objetivosCustomDesde = null, objetivosCustomHasta = null; // strings "YYYY-MM-DD"
 
   // ---------------- Objetivos: constantes ----------------
   // Objetivo fijo para cerrar el faltante de cash flow de septiembre 2026 ($40.435.000),
@@ -398,36 +412,81 @@
   function weekKey(d) { return mondayOfWeek(d).toISOString().slice(0, 10); }
   function semanaActualKey() { return weekKey(new Date()); }
 
-  // Suma las semanas cargadas del local cuyo lunes cae dentro del mes actual.
+  // ---- rango custom: helpers de fechas en formato "YYYY-MM-DD" ----
+  function diasEntre(desdeStr, hastaStr) {
+    const d1 = new Date(desdeStr + "T00:00:00"), d2 = new Date(hastaStr + "T00:00:00");
+    return Math.round((d2 - d1) / 86400000) + 1;
+  }
+  function rangoAnteriorStr(desdeStr, hastaStr) {
+    const dias = diasEntre(desdeStr, hastaStr);
+    const d1 = new Date(desdeStr + "T00:00:00");
+    const prevHasta = new Date(d1.getTime() - 86400000);
+    const prevDesde = new Date(prevHasta.getTime() - (dias - 1) * 86400000);
+    const f = d => d.toISOString().slice(0, 10);
+    return { desde: f(prevDesde), hasta: f(prevHasta) };
+  }
+  function sumarPorDiaRango(desdeStr, hastaStr) {
+    const porDia = (data && data.porDia) || {};
+    let facturacion = 0, unidades = 0;
+    Object.entries(porDia).forEach(([key, v]) => {
+      if (key >= desdeStr && key <= hastaStr) {
+        facturacion += Number(v.facturacion || 0);
+        unidades += Number(v.unidades || 0);
+      }
+    });
+    return { facturacion, unidades };
+  }
+  function sumarSemanasEnRango(desdeStr, hastaStr) {
+    const semanas = objetivosLocal.semanas || {};
+    let facturacion = 0, unidades = 0;
+    Object.keys(semanas).forEach(key => {
+      if (key >= desdeStr && key <= hastaStr) {
+        facturacion += Number(semanas[key].facturacion || 0);
+        unidades += Number(semanas[key].unidades || 0);
+      }
+    });
+    return { facturacion, unidades };
+  }
+
+  // Suma las semanas cargadas del local cuyo lunes cae dentro del mes actual (o del rango custom elegido).
   function localActualPeriodo() {
+    if (objetivosPeriodo === "custom" && objetivosCustomDesde && objetivosCustomHasta) {
+      return sumarSemanasEnRango(objetivosCustomDesde, objetivosCustomHasta);
+    }
     const semanas = objetivosLocal.semanas || {};
     if (objetivosPeriodo === "semanal") {
       const s = semanas[semanaActualKey()];
-      return { facturacion: (s && s.facturacion) || 0, unidades: (s && s.unidades) || 0, categorias: (s && s.categorias) || {} };
+      return { facturacion: (s && s.facturacion) || 0, unidades: (s && s.unidades) || 0 };
     }
     const now = new Date();
     let facturacion = 0, unidades = 0;
-    const categorias = {};
     Object.keys(semanas).forEach(key => {
       const fecha = new Date(key + "T00:00:00");
       if (fecha.getMonth() === now.getMonth() && fecha.getFullYear() === now.getFullYear()) {
         facturacion += Number(semanas[key].facturacion || 0);
         unidades += Number(semanas[key].unidades || 0);
-        Object.entries(semanas[key].categorias || {}).forEach(([cat, v]) => {
-          const prev = categorias[cat] || { facturacion: 0, unidades: 0 };
-          prev.facturacion += Number(v.facturacion || 0);
-          prev.unidades += Number(v.unidades || 0);
-          categorias[cat] = prev;
-        });
       }
     });
-    return { facturacion, unidades, categorias };
+    return { facturacion, unidades };
+  }
+  function localAnteriorPeriodo() {
+    if (!objetivosCustomDesde || !objetivosCustomHasta) return { facturacion: 0, unidades: 0 };
+    const { desde, hasta } = rangoAnteriorStr(objetivosCustomDesde, objetivosCustomHasta);
+    return sumarSemanasEnRango(desde, hasta);
   }
 
   function webActualPeriodo() {
+    if (objetivosPeriodo === "custom" && objetivosCustomDesde && objetivosCustomHasta) {
+      return sumarPorDiaRango(objetivosCustomDesde, objetivosCustomHasta);
+    }
     const key = objetivosPeriodo === "mensual" ? "estemes" : "7dias";
     const kpis = (data.kpisPorPeriodo || {})[key] || {};
     return { facturacion: kpis.facturacionTotal || 0, unidades: kpis.unidadesVendidas || 0 };
+  }
+  function webAnteriorPeriodo() {
+    if (!objetivosCustomDesde || !objetivosCustomHasta) return { facturacion: 0, unidades: 0 };
+    const { desde, hasta } = rangoAnteriorStr(objetivosCustomDesde, objetivosCustomHasta);
+    return sumarPorDiaRango(desde, hasta);
   }
 
   const MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
@@ -444,12 +503,42 @@
     const opts = { day: "numeric", month: "short" };
     return `${lunes.toLocaleDateString("es-AR", opts)} – hoy`;
   }
+  function rango7DiasActual() {
+    const hoy = new Date();
+    const hace7 = new Date(hoy); hace7.setDate(hoy.getDate() - 6);
+    const opts = { day: "numeric", month: "short" };
+    return `${hace7.toLocaleDateString("es-AR", opts)} – hoy`;
+  }
 
-  function renderObjetivoCard(nombre, fuente, periodoTexto, actual, objetivo) {
+  function renderObjetivoCard(nombre, fuente, periodoTexto, actual, objetivo, opts) {
+    opts = opts || {};
     const val = objetivosMetrica === "facturacion" ? actual.facturacion : actual.unidades;
     const obj = objetivosMetrica === "facturacion" ? objetivo.facturacion : objetivo.unidades;
-    const pct = obj > 0 ? Math.min(999, (val / obj) * 100) : (val > 0 ? 100 : 0);
     const fmt = objetivosMetrica === "facturacion" ? fmtMoney : fmtNum;
+
+    if (opts.comparacion) {
+      const diff = val - obj;
+      const pctVar = obj > 0 ? (diff / obj) * 100 : (val > 0 ? 100 : 0);
+      const subiendo = pctVar >= 0;
+      return `
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-1">
+            <div class="font-bold text-sm">${nombre}</div>
+            <div class="text-[11px] text-slate-400">${fuente}</div>
+          </div>
+          <div class="text-[11px] text-slate-400 mb-2">${periodoTexto}</div>
+          <div class="flex items-baseline justify-between mb-2">
+            <div class="text-2xl font-bold">${fmt(val)}</div>
+            <div class="text-xs text-slate-400">anterior <b class="text-slate-600">${fmt(obj)}</b></div>
+          </div>
+          <div class="flex justify-between text-xs">
+            <span class="font-bold ${subiendo ? "text-green-600" : "text-red-500"}">${subiendo ? "▲" : "▼"} ${Math.abs(pctVar).toFixed(0)}% vs. período anterior</span>
+            <span class="text-slate-400">${diff >= 0 ? "+" : ""}${fmt(diff)}</span>
+          </div>
+        </div>`;
+    }
+
+    const pct = obj > 0 ? Math.min(999, (val / obj) * 100) : (val > 0 ? 100 : 0);
     const falta = Math.max(0, obj - val);
     const barColor = pct >= 100 ? "bg-green-500" : pct >= 60 ? "bg-indigo-500" : "bg-red-400";
     return `
@@ -477,6 +566,28 @@
     if (!data) return;
     document.getElementById("objetivosMetrica").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.metrica === objetivosMetrica));
     document.getElementById("objetivosPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === objetivosPeriodo));
+    document.getElementById("objetivosCustomFechas").classList.toggle("hidden", objetivosPeriodo !== "custom");
+
+    if (objetivosPeriodo === "custom") {
+      if (!objetivosCustomDesde || !objetivosCustomHasta) {
+        document.getElementById("objetivosCards").innerHTML = '<div class="text-slate-400 text-sm p-4 col-span-3">Elegí un rango de fechas arriba y tocá "Aplicar".</div>';
+        return;
+      }
+      const webActual = webActualPeriodo();
+      const webAnt = webAnteriorPeriodo();
+      const localActual = localActualPeriodo();
+      const localAnt = localAnteriorPeriodo();
+      const totalActual = { facturacion: webActual.facturacion + localActual.facturacion, unidades: webActual.unidades + localActual.unidades };
+      const totalAnt = { facturacion: webAnt.facturacion + localAnt.facturacion, unidades: webAnt.unidades + localAnt.unidades };
+      const { desde: antDesde, hasta: antHasta } = rangoAnteriorStr(objetivosCustomDesde, objetivosCustomHasta);
+      const fmtFecha = s => new Date(s + "T00:00:00").toLocaleDateString("es-AR", { day: "numeric", month: "short" });
+
+      document.getElementById("objetivosCards").innerHTML =
+        renderObjetivoCard("Web", "Automático · Tiendanube", `${fmtFecha(objetivosCustomDesde)} – ${fmtFecha(objetivosCustomHasta)} vs. ${fmtFecha(antDesde)} – ${fmtFecha(antHasta)}`, webActual, webAnt, { comparacion: true }) +
+        renderObjetivoCard("Local Avellaneda", "Carga manual", `Semanas en el rango vs. mismo rango anterior`, localActual, localAnt, { comparacion: true }) +
+        renderObjetivoCard("Total", "", `Web + Local, rango elegido vs. anterior`, totalActual, totalAnt, { comparacion: true });
+      return;
+    }
 
     const webActual = webActualPeriodo();
     const webObj = objetivoPorPeriodo("web");
@@ -485,9 +596,9 @@
     const totalActual = { facturacion: webActual.facturacion + localActual.facturacion, unidades: webActual.unidades + localActual.unidades };
     const totalObj = { facturacion: webObj.facturacion + localObj.facturacion, unidades: webObj.unidades + localObj.unidades };
 
-    const periodoWeb = objetivosPeriodo === "mensual" ? `Comparando: ${rangoMesActual()} vs. objetivo mensual` : `Comparando: ${rangoSemanaActual()} (últimos 7 días) vs. objetivo semanal`;
-    const periodoLocal = objetivosPeriodo === "mensual" ? `Suma de semanas cargadas de ${nombreMesActual()} vs. objetivo mensual` : `Semana cargada: ${rangoSemanaActual()} vs. objetivo semanal`;
-    const periodoTotal = objetivosPeriodo === "mensual" ? "Web (mes en curso) + Local (semanas cargadas del mes)" : "Web (últimos 7 días) + Local (semana actual)";
+    const periodoWeb = objetivosPeriodo === "mensual" ? `Comparando: ${rangoMesActual()} vs. objetivo mensual` : `Comparando: ${rango7DiasActual()} (últimos 7 días) vs. objetivo semanal`;
+    const periodoLocal = objetivosPeriodo === "mensual" ? `Suma de semanas cargadas de ${nombreMesActual()} vs. objetivo mensual` : `Semana cargada: ${rangoSemanaActual()} (lunes a hoy) vs. objetivo semanal`;
+    const periodoTotal = objetivosPeriodo === "mensual" ? "Web (mes en curso) + Local (semanas cargadas del mes)" : "Web (últimos 7 días corridos) + Local (semana calendario actual)";
 
     document.getElementById("objetivosCards").innerHTML =
       renderObjetivoCard("Web", "Automático · Tiendanube", periodoWeb, webActual, webObj) +
@@ -501,7 +612,21 @@
   });
   document.getElementById("objetivosPeriodo").addEventListener("click", e => {
     const btn = e.target.closest("button"); if (!btn) return;
-    objetivosPeriodo = btn.dataset.periodo; renderObjetivos();
+    objetivosPeriodo = btn.dataset.periodo;
+    if (objetivosPeriodo === "custom" && !objetivosCustomDesde) {
+      const hoy = new Date();
+      const hace7 = new Date(hoy); hace7.setDate(hoy.getDate() - 6);
+      document.getElementById("objetivosCustomDesde").value = hace7.toISOString().slice(0, 10);
+      document.getElementById("objetivosCustomHasta").value = hoy.toISOString().slice(0, 10);
+    }
+    renderObjetivos();
+  });
+  document.getElementById("objetivosCustomAplicar").addEventListener("click", () => {
+    const d = document.getElementById("objetivosCustomDesde").value;
+    const h = document.getElementById("objetivosCustomHasta").value;
+    if (!d || !h || d > h) { alert("Revisá las fechas: 'Desde' tiene que ser antes que 'Hasta'."); return; }
+    objetivosCustomDesde = d; objetivosCustomHasta = h;
+    renderObjetivos();
   });
 
   document.getElementById("objetivosLocalGuardar").addEventListener("click", () => {
