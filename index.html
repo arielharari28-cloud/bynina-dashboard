@@ -270,10 +270,6 @@
       <p class="text-sm text-slate-500 mt-1 mb-4">Objetivo calculado para cerrar el faltante de cash flow ($40.435.000), repartido proporcionalmente entre web y local sobre la base de agosto 2026.</p>
 
       <div class="flex flex-wrap gap-2 mb-5">
-        <div class="flex gap-1.5" id="objetivosMetrica">
-          <button class="pill active" data-metrica="facturacion">$</button>
-          <button class="pill" data-metrica="unidades">Unidades</button>
-        </div>
         <div class="flex gap-1.5" id="objetivosPeriodo">
           <button class="pill active" data-periodo="mensual">Mensual</button>
           <button class="pill" data-periodo="semanal">Semanal</button>
@@ -292,6 +288,7 @@
         </div>
         <button id="objetivosCustomAplicar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors">Aplicar</button>
         <div class="text-xs text-slate-400 max-w-xs">Se compara contra el mismo Nº de días inmediatamente anterior. Local: solo suma semanas cuyo lunes caiga dentro del rango — es aproximado.</div>
+      </div>
 
       <div id="objetivosCards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
 
@@ -394,7 +391,7 @@
   let nuevosBuscar = "";
   let sinventasStock = "conStock", sinventasOrden = "masNuevos", sinventasCategoria = "", sinventasBuscar = "";
 
-  let objetivosMetrica = "facturacion", objetivosPeriodo = "mensual";
+  let objetivosPeriodo = "mensual";
   let objetivosLocal = {};
   let objetivosCustomDesde = null, objetivosCustomHasta = null; // strings "YYYY-MM-DD"
 
@@ -531,35 +528,39 @@
 
   function renderObjetivoCard(nombre, fuente, periodoTexto, actual, objetivo, opts) {
     opts = opts || {};
-    const val = objetivosMetrica === "facturacion" ? actual.facturacion : actual.unidades;
-    const obj = objetivosMetrica === "facturacion" ? objetivo.facturacion : objetivo.unidades;
-    const fmt = objetivosMetrica === "facturacion" ? fmtMoney : fmtNum;
 
-    if (opts.comparacion) {
-      const diff = val - obj;
-      const pctVar = obj > 0 ? (diff / obj) * 100 : (val > 0 ? 100 : 0);
-      const subiendo = pctVar >= 0;
+    function bloque(label, val, obj) {
+      if (opts.comparacion) {
+        const diff = val - obj;
+        const pctVar = obj > 0 ? (diff / obj) * 100 : (val > 0 ? 100 : 0);
+        const subiendo = pctVar >= 0;
+        return `
+          <div class="flex items-baseline justify-between">
+            <div class="text-lg font-bold">${label === "$" ? fmtMoney(val) : fmtNum(val) + " u."}</div>
+            <div class="text-[11px] text-slate-400">anterior <b class="text-slate-600">${label === "$" ? fmtMoney(obj) : fmtNum(obj) + " u."}</b></div>
+          </div>
+          <div class="flex justify-between text-[11px] mb-2">
+            <span class="font-bold ${subiendo ? "text-green-600" : "text-red-500"}">${subiendo ? "▲" : "▼"} ${Math.abs(pctVar).toFixed(0)}%</span>
+            <span class="text-slate-400">${diff >= 0 ? "+" : ""}${label === "$" ? fmtMoney(diff) : fmtNum(diff) + " u."}</span>
+          </div>`;
+      }
+      const pct = obj > 0 ? Math.min(999, (val / obj) * 100) : (val > 0 ? 100 : 0);
+      const falta = Math.max(0, obj - val);
+      const barColor = pct >= 100 ? "bg-green-500" : pct >= 60 ? "bg-indigo-500" : "bg-red-400";
       return `
-        <div class="card p-5">
-          <div class="flex items-center justify-between mb-1">
-            <div class="font-bold text-sm">${nombre}</div>
-            <div class="text-[11px] text-slate-400">${fuente}</div>
-          </div>
-          <div class="text-[11px] text-slate-400 mb-2">${periodoTexto}</div>
-          <div class="flex items-baseline justify-between mb-2">
-            <div class="text-2xl font-bold">${fmt(val)}</div>
-            <div class="text-xs text-slate-400">anterior <b class="text-slate-600">${fmt(obj)}</b></div>
-          </div>
-          <div class="flex justify-between text-xs">
-            <span class="font-bold ${subiendo ? "text-green-600" : "text-red-500"}">${subiendo ? "▲" : "▼"} ${Math.abs(pctVar).toFixed(0)}% vs. período anterior</span>
-            <span class="text-slate-400">${diff >= 0 ? "+" : ""}${fmt(diff)}</span>
-          </div>
+        <div class="flex items-baseline justify-between">
+          <div class="text-lg font-bold">${label === "$" ? fmtMoney(val) : fmtNum(val) + " u."}</div>
+          <div class="text-[11px] text-slate-400">objetivo <b class="text-slate-600">${label === "$" ? fmtMoney(obj) : fmtNum(obj) + " u."}</b></div>
+        </div>
+        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-1 mt-1">
+          <div class="h-full ${barColor} rounded-full" style="width:${Math.min(100, pct)}%"></div>
+        </div>
+        <div class="flex justify-between text-[11px] text-slate-400 mb-2">
+          <span><b class="text-slate-600">${pct.toFixed(0)}%</b> del objetivo</span>
+          <span>${falta > 0 ? "faltan " + (label === "$" ? fmtMoney(falta) : fmtNum(falta) + " u.") : "¡cumplido!"}</span>
         </div>`;
     }
 
-    const pct = obj > 0 ? Math.min(999, (val / obj) * 100) : (val > 0 ? 100 : 0);
-    const falta = Math.max(0, obj - val);
-    const barColor = pct >= 100 ? "bg-green-500" : pct >= 60 ? "bg-indigo-500" : "bg-red-400";
     return `
       <div class="card p-5">
         <div class="flex items-center justify-between mb-1">
@@ -567,23 +568,15 @@
           <div class="text-[11px] text-slate-400">${fuente}</div>
         </div>
         <div class="text-[11px] text-slate-400 mb-2">${periodoTexto}</div>
-        <div class="flex items-baseline justify-between mb-2">
-          <div class="text-2xl font-bold">${fmt(val)}</div>
-          <div class="text-xs text-slate-400">objetivo <b class="text-slate-600">${fmt(obj)}</b></div>
-        </div>
-        <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden mb-1.5">
-          <div class="h-full ${barColor} rounded-full" style="width:${Math.min(100, pct)}%"></div>
-        </div>
-        <div class="flex justify-between text-xs text-slate-400">
-          <span><b class="text-slate-600">${pct.toFixed(0)}%</b> del objetivo</span>
-          <span>${falta > 0 ? "faltan " + fmt(falta) : "¡objetivo cumplido!"}</span>
-        </div>
+        <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5">Facturación</div>
+        ${bloque("$", actual.facturacion, objetivo.facturacion)}
+        <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-0.5 pt-1 border-t border-slate-100">Unidades</div>
+        ${bloque("u", actual.unidades, objetivo.unidades)}
       </div>`;
   }
 
   function renderObjetivos() {
     if (!data) return;
-    document.getElementById("objetivosMetrica").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.metrica === objetivosMetrica));
     document.getElementById("objetivosPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === objetivosPeriodo));
     document.getElementById("objetivosCustomFechas").classList.toggle("hidden", objetivosPeriodo !== "custom");
 
@@ -625,10 +618,6 @@
       renderObjetivoCard("Total", "", periodoTotal, totalActual, totalObj);
   }
 
-  document.getElementById("objetivosMetrica").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    objetivosMetrica = btn.dataset.metrica; renderObjetivos();
-  });
   document.getElementById("objetivosPeriodo").addEventListener("click", e => {
     const btn = e.target.closest("button"); if (!btn) return;
     objetivosPeriodo = btn.dataset.periodo;
