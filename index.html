@@ -292,6 +292,13 @@
 
       <div id="objetivosCards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
 
+      <div class="card p-5 mb-6" id="objetivosCategoriaBox">
+        <div class="font-bold text-sm mb-1">📐 Por categoría — solo prenda real (web)</div>
+        <p class="text-xs text-slate-500 mb-3">Filtrado a categorías de producto reales, ignorando etiquetas de promo/colección (Winter Sale, Liquidación, etc.). Útil para planificar cuánto cortar de cada categoría.</p>
+        <div id="objetivosCategoriaTabla"></div>
+        <p class="text-[11px] text-slate-400 mt-3">¿Falta o sobra alguna categoría en la lista? Avisame para ajustar el filtro.</p>
+      </div>
+
       <div class="card p-5" id="objetivosLocalCarga">
         <div class="font-bold text-sm mb-1">🗓️ ¿Qué semana estás cargando?</div>
         <p class="text-xs text-slate-500 mb-2">Elegí el lunes de la semana del Excel que vas a subir (por defecto, la semana actual). Podés volver para atrás y cargar semanas pasadas de agosto una por una.</p>
@@ -627,10 +634,52 @@
       </div>`;
   }
 
+  // Categorías reales de prenda — Tiendanube mezcla esto con etiquetas de promo/colección
+  // (Winter Sale, Liquidación, temporadas, etc.) en el mismo campo "categorías" del producto,
+  // así que hay que filtrar a mano contra esta lista para que el panel sirva para planificar.
+  const CATEGORIAS_REALES = [
+    "remeras", "tops", "tejidos", "sweaters", "tejidos | sweaters", "buzos",
+    "capsula importados", "cápsula importados", "gamulanes", "camperas", "gamulanes / camperas", "gamulanes/camperas",
+    "pantalones", "shorts", "pantalones - shorts", "pantalones/shorts", "body", "jeans", "jean",
+    "accesorios", "blazers", "camisas", "blazers / camisas", "blazers/camisas", "vestidos",
+  ];
+  function esCategoriaReal(nombre) {
+    const n = (nombre || "").toLowerCase().trim();
+    return CATEGORIAS_REALES.some(c => n === c || n.includes(c));
+  }
+
+  function renderObjetivosCategoria() {
+    const cont = document.getElementById("objetivosCategoriaTabla");
+    if (!cont) return;
+    const cats = (data.porCategoriaPorPeriodo || {}).estemes || [];
+    const filas = cats
+      .filter(c => esCategoriaReal(c.categoria))
+      .map(c => ({ ...c, precioProm: c.unidades > 0 ? c.facturacion / c.unidades : 0 }))
+      .sort((a, b) => b.facturacion - a.facturacion);
+
+    if (!filas.length) {
+      cont.innerHTML = '<div class="text-slate-400 text-sm">No encontré categorías reales en los datos de este mes — puede que los nombres no coincidan con el filtro. Avisame los nombres exactos y lo ajusto.</div>';
+      return;
+    }
+    cont.innerHTML = `<table class="w-full text-sm">
+      <thead><tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100">
+        <th class="py-2">Categoría</th><th class="py-2 text-right">Unidades</th><th class="py-2 text-right">Facturación</th><th class="py-2 text-right">Precio prom.</th>
+      </tr></thead>
+      <tbody>${filas.map(f => `
+        <tr class="border-b border-slate-50">
+          <td class="py-2 font-semibold">${f.categoria}</td>
+          <td class="py-2 text-right">${fmtNum(f.unidades)}</td>
+          <td class="py-2 text-right">${fmtMoney(f.facturacion)}</td>
+          <td class="py-2 text-right">${fmtMoney(f.precioProm)}</td>
+        </tr>`).join("")}
+      </tbody></table>`;
+  }
+
   function renderObjetivos() {
     if (!data) return;
     document.getElementById("objetivosPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === objetivosPeriodo));
     document.getElementById("objetivosCustomFechas").classList.toggle("hidden", objetivosPeriodo !== "custom");
+    renderObjetivosCategoria(); // independiente del toggle Mensual/Semanal/Personalizado — siempre mes en curso
 
     if (objetivosPeriodo === "custom") {
       if (!objetivosCustomDesde || !objetivosCustomHasta) {
