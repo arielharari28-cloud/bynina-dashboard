@@ -44,6 +44,7 @@
     <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
+    <div class="navitem" data-view="resumen">🗂️ Resumen</div>
   </nav>
   <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">Datos vía Tienda Nube</div>
 </aside>
@@ -307,7 +308,7 @@
 
         <div class="border-t border-slate-100 pt-4">
           <div class="font-bold text-sm mb-1">📄 Subir Excel de Ninox</div>
-          <p class="text-xs text-slate-500 mb-3">Filtrá ese período en Ninox antes de exportar (una semana). Suma sola las columnas Cantidad y Venta Total.</p>
+          <p class="text-xs text-slate-500 mb-3">Filtrá ese período en Ninox antes de exportar (una semana). Categoriza cada artículo por palabra clave en la Descripción.</p>
           <input type="file" id="objetivosExcelInput" accept=".xlsx,.xls" class="text-sm mb-2" />
           <div id="objetivosExcelPreview" class="hidden mt-3"></div>
         </div>
@@ -352,6 +353,25 @@
       </div>
 
       <div id="ganadoresGrid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
+    </div>
+
+    <!-- ===================== RESUMEN ===================== -->
+    <div class="view" data-view="resumen">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🗂️ Resumen</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-5">Todo junto: facturación del mes, ganadores y categorías — web + local.</p>
+
+      <div id="resumenTotalCard" class="mb-6"></div>
+
+      <div class="card p-5 mb-6">
+        <div class="font-bold text-sm mb-3">🏅 Top ganadores del mes</div>
+        <div id="resumenGanadoresLista" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"></div>
+      </div>
+
+      <div class="card p-5">
+        <div class="font-bold text-sm mb-1">📐 Por categoría</div>
+        <p class="text-xs text-slate-500 mb-3">Web (automático) + Local (categorizado desde tus cargas de Excel).</p>
+        <div id="resumenCategoriaTabla"></div>
+      </div>
     </div>
 
     <!-- ===================== MODAL REPOSICIÓN ===================== -->
@@ -544,8 +564,24 @@
     });
     return { facturacion, unidades };
   }
-  function localAnteriorPeriodo() {
-    if (!objetivosCustomDesde || !objetivosCustomHasta) return { facturacion: 0, unidades: 0 };
+  // Suma las categorías cargadas del local (por palabra clave) para todas las semanas del mes en curso.
+  function localCategoriasMesActual() {
+    const semanas = objetivosLocal.semanas || {};
+    const now = new Date();
+    const out = {};
+    Object.keys(semanas).forEach(key => {
+      const fecha = new Date(key + "T00:00:00");
+      if (fecha.getMonth() !== now.getMonth() || fecha.getFullYear() !== now.getFullYear()) return;
+      Object.entries(semanas[key].categorias || {}).forEach(([cat, v]) => {
+        const prev = out[cat] || { facturacion: 0, unidades: 0 };
+        prev.facturacion += Number(v.facturacion || 0);
+        prev.unidades += Number(v.unidades || 0);
+        out[cat] = prev;
+      });
+    });
+    return out;
+  }
+  function localAnteriorPeriodo() {    if (!objetivosCustomDesde || !objetivosCustomHasta) return { facturacion: 0, unidades: 0 };
     const { desde, hasta } = rangoAnteriorStr(objetivosCustomDesde, objetivosCustomHasta);
     return sumarSemanasEnRango(desde, hasta);
   }
@@ -648,14 +684,29 @@
     return CATEGORIAS_REALES.some(c => n === c || n.includes(c));
   }
 
-  function renderObjetivosCategoria() {
-    const cont = document.getElementById("objetivosCategoriaTabla");
+  function renderObjetivosCategoria(contId) {
+    const cont = document.getElementById(contId || "objetivosCategoriaTabla");
     if (!cont) return;
-    const cats = (data.porCategoriaPorPeriodo || {}).estemes || [];
-    const filas = cats
-      .filter(c => esCategoriaReal(c.categoria))
-      .map(c => ({ ...c, precioProm: c.unidades > 0 ? c.facturacion / c.unidades : 0 }))
-      .sort((a, b) => b.facturacion - a.facturacion);
+    const catsWeb = (data.porCategoriaPorPeriodo || {}).estemes || [];
+    const combinado = {};
+    catsWeb.filter(c => esCategoriaReal(c.categoria)).forEach(c => {
+      combinado[c.categoria] = combinado[c.categoria] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
+      combinado[c.categoria].web.facturacion += c.facturacion;
+      combinado[c.categoria].web.unidades += c.unidades;
+    });
+    const catsLocal = localCategoriasMesActual();
+    Object.entries(catsLocal).forEach(([cat, v]) => {
+      if (cat === "Sin categoría") return;
+      combinado[cat] = combinado[cat] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
+      combinado[cat].local.facturacion += v.facturacion;
+      combinado[cat].local.unidades += v.unidades;
+    });
+
+    const filas = Object.entries(combinado).map(([cat, v]) => {
+      const facturacion = v.web.facturacion + v.local.facturacion;
+      const unidades = v.web.unidades + v.local.unidades;
+      return { categoria: cat, facturacion, unidades, precioProm: unidades > 0 ? facturacion / unidades : 0 };
+    }).sort((a, b) => b.facturacion - a.facturacion);
 
     if (!filas.length) {
       cont.innerHTML = '<div class="text-slate-400 text-sm">No encontré categorías reales en los datos de este mes — puede que los nombres no coincidan con el filtro. Avisame los nombres exactos y lo ajusto.</div>';
@@ -672,7 +723,8 @@
           <td class="py-2 text-right">${fmtMoney(f.facturacion)}</td>
           <td class="py-2 text-right">${fmtMoney(f.precioProm)}</td>
         </tr>`).join("")}
-      </tbody></table>`;
+      </tbody></table>
+      <p class="text-[11px] text-slate-400 mt-2">Web (automático) + Local (categorizado por palabra clave desde tus cargas de Excel). Solo suma semanas del local ya cargadas este mes.</p>`;
   }
 
   function renderObjetivos() {
@@ -760,6 +812,28 @@
   { const elSemanaCarga = document.getElementById("objetivosSemanaCarga"); if (elSemanaCarga && !elSemanaCarga.value) elSemanaCarga.value = semanaActualKey(); }
 
   // ---------------- Objetivos: importar Excel de Ninox ----------------
+  // Orden importa: se evalúa de arriba a abajo y gana la primera que matchea. Usa las mismas
+  // categorías "reales" que el filtro de la tabla de arriba, para que web y local sumen bien.
+  const CATEGORIA_KEYWORDS_LOCAL = [
+    { cat: "Vestidos", kws: ["vestido"] },
+    { cat: "Jeans", kws: ["jean"] },
+    { cat: "Body", kws: ["body"] },
+    { cat: "Blazers / Camisas", kws: ["blazer", "camisa"] },
+    { cat: "Pantalones - Shorts", kws: ["pantalon", "short", "bermuda", "palazzo"] },
+    { cat: "Gamulanes/Camperas", kws: ["campera", "gamulan", "tapado", "piloto", "parka"] },
+    { cat: "Buzos", kws: ["buzo", "hoodie", "canguro"] },
+    { cat: "Tejidos | Sweaters", kws: ["sweater", "tejido", "cardigan", "chaleco"] },
+    { cat: "Tops", kws: ["top ", "musculosa", "corset", "crop"] },
+    { cat: "Remeras", kws: ["remera", "chomba"] },
+    { cat: "Accesorios", kws: ["gorra", "cinturon", "bufanda", "accesorio", "mochila", "cartera"] },
+  ];
+  function categorizarDescripcionLocal(desc) {
+    const n = " " + normalizar(desc) + " ";
+    for (const { cat, kws } of CATEGORIA_KEYWORDS_LOCAL) {
+      if (kws.some(k => n.includes(k))) return cat;
+    }
+    return "Sin categoría";
+  }
   function parseNumAR(v) {
     if (typeof v === "number") return v;
     if (v === null || v === undefined || v === "") return 0;
@@ -793,19 +867,32 @@
 
         const idxCant = header.findIndex(h => normalizar(h).includes("cantidad"));
         const idxVentaTotal = header.findIndex(h => normalizar(h) === "venta total");
+        const idxDesc = header.findIndex(h => normalizar(h).includes("descripcion"));
         if (idxCant === -1 || idxVentaTotal === -1) throw new Error("No encontré las columnas Cantidad / Venta Total. Revisá el encabezado.");
 
         let facturacion = 0, unidades = 0;
+        const categorias = {};
         dataRows.forEach(r => {
-          unidades += parseNumAR(r[idxCant]);
-          facturacion += parseNumAR(r[idxVentaTotal]);
+          const u = parseNumAR(r[idxCant]);
+          const f = parseNumAR(r[idxVentaTotal]);
+          unidades += u;
+          facturacion += f;
+          if (idxDesc !== -1) {
+            const cat = categorizarDescripcionLocal(r[idxDesc]);
+            const prev = categorias[cat] || { facturacion: 0, unidades: 0 };
+            prev.facturacion += f; prev.unidades += u;
+            categorias[cat] = prev;
+          }
         });
 
-        objetivosExcelParseado = { facturacion, unidades };
+        objetivosExcelParseado = { facturacion, unidades, categorias };
         document.getElementById("objetivosExcelPreview").className = "mt-3 border border-slate-200 rounded-lg p-3 bg-slate-50";
         const lunesSel = new Date(semanaCargaKey() + "T00:00:00");
+        const filasCat = Object.entries(categorias).sort((a, b) => b[1].facturacion - a[1].facturacion);
         document.getElementById("objetivosExcelPreview").innerHTML = `
-          <div class="text-sm font-bold mb-3">${dataRows.length} artículos leídos · Venta Total ${fmtMoney(facturacion)} · ${fmtNum(unidades)} unid.</div>
+          <div class="text-sm font-bold mb-2">${dataRows.length} artículos leídos · Venta Total ${fmtMoney(facturacion)} · ${fmtNum(unidades)} unid.</div>
+          ${filasCat.length ? `<div class="space-y-0.5 mb-3">${filasCat.map(([cat, v]) => `<div class="flex justify-between text-xs ${cat === "Sin categoría" ? "text-red-500 font-semibold" : "text-slate-600"}"><span>${cat}</span><span>${fmtMoney(v.facturacion)} · ${fmtNum(v.unidades)}u</span></div>`).join("")}</div>` : ""}
+          ${categorias["Sin categoría"] ? '<div class="text-xs text-red-500 mb-2">⚠️ Hay productos que no matchearon ninguna categoría — mandame esas descripciones y agrego la palabra clave.</div>' : ""}
           <div class="text-xs text-slate-500 mb-3">Se va a guardar en la semana del <b>${lunesSel.toLocaleDateString("es-AR", { day: "numeric", month: "short" })}</b> (la que elegiste arriba).</div>
           <button id="objetivosExcelConfirmar" class="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar y guardar en esa semana</button>
         `;
@@ -1477,7 +1564,51 @@
   }
 
   function renderAll() {
-    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
+    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab(); renderResumenTab();
+  }
+
+  // ---------------- Resumen (todo junto: total, ganadores, categorías) ----------------
+  function renderResumenTab() {
+    if (!data) return;
+    const webActual = webActualPeriodoParaResumen();
+    const localActual = localActualPeriodoParaResumen();
+    const webObj = objetivoMensual("web");
+    const localObj = objetivoMensual("local");
+    const totalActual = { facturacion: webActual.facturacion + localActual.facturacion, unidades: webActual.unidades + localActual.unidades };
+    const totalObj = { facturacion: webObj.facturacion + localObj.facturacion, unidades: webObj.unidades + localObj.unidades };
+    document.getElementById("resumenTotalCard").innerHTML = renderObjetivoCard("Total facturación — mes en curso", "Web + Local", `${rangoMesActual()} vs. objetivo mensual`, totalActual, totalObj);
+
+    // Top ganadores (mismo cálculo que la pestaña Ganadores, mes en curso, sin filtro/orden manual).
+    const { ganadores } = calcularGanadoresBase("estemes");
+    const top = ganadores.sort((a, b) => (b.ventasPorPeriodo.estemes?.unidades || 0) - (a.ventasPorPeriodo.estemes?.unidades || 0)).slice(0, 6);
+    document.getElementById("resumenGanadoresLista").innerHTML = top.map(p => `
+      <div class="text-center">
+        <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100 rounded-lg mb-1" onerror="this.style.visibility='hidden'" />
+        <div class="text-[11px] font-semibold leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
+        <div class="text-[10px] text-slate-400">${fmtNum(p.ventasPorPeriodo.estemes?.unidades || 0)} u.</div>
+      </div>`).join("") || '<div class="text-slate-400 text-sm col-span-full">Sin datos todavía.</div>';
+
+    renderObjetivosCategoria("resumenCategoriaTabla");
+  }
+  // webActualPeriodo()/localActualPeriodo() dependen del toggle Mensual/Semanal/Personalizado de
+  // la pestaña Objetivos — acá en Resumen siempre queremos "mes en curso" sin importar en qué
+  // posición haya quedado ese toggle, así que se recalculan directo en vez de reusar esas.
+  function webActualPeriodoParaResumen() {
+    const kpis = (data.kpisPorPeriodo || {}).estemes || {};
+    return { facturacion: kpis.facturacionTotal || 0, unidades: kpis.unidadesVendidas || 0 };
+  }
+  function localActualPeriodoParaResumen() {
+    const semanas = objetivosLocal.semanas || {};
+    const now = new Date();
+    let facturacion = 0, unidades = 0;
+    Object.keys(semanas).forEach(key => {
+      const fecha = new Date(key + "T00:00:00");
+      if (fecha.getMonth() === now.getMonth() && fecha.getFullYear() === now.getFullYear()) {
+        facturacion += Number(semanas[key].facturacion || 0);
+        unidades += Number(semanas[key].unidades || 0);
+      }
+    });
+    return { facturacion, unidades };
   }
 
   // ---------------- Ganadores (pestaña con foto + cortado vs. período) ----------------
