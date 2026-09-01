@@ -44,7 +44,6 @@
     <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
-    <div class="navitem" data-view="resumen">🗂️ Resumen</div>
   </nav>
   <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">Datos vía Tienda Nube</div>
 </aside>
@@ -304,8 +303,8 @@
       </div>
 
       <div class="card p-5" id="objetivosLocalCarga">
-        <div class="font-bold text-sm mb-1">🗓️ ¿Qué semana estás cargando?</div>
-        <p class="text-xs text-slate-500 mb-2">Elegí el lunes de la semana del Excel que vas a subir (por defecto, la semana actual). Podés volver para atrás y cargar semanas pasadas de agosto una por una.</p>
+        <div class="font-bold text-sm mb-1">🗓️ ¿Qué fecha estás cargando?</div>
+        <p class="text-xs text-slate-500 mb-2">Elegí exactamente la fecha que quieras — no se ajusta sola a ningún lunes. Usalo como identificador de esa carga (por ejemplo, el último día del período que exportaste de Ninox). Podés volver para atrás y cargar fechas pasadas una por una.</p>
         <input type="date" id="objetivosSemanaCarga" class="border border-slate-200 rounded-lg px-3 py-2 text-sm mb-1" onchange="renderSemanaCargaEstado()" />
         <div id="objetivosSemanaCargaEstado" class="text-xs text-slate-400 mb-3"></div>
 
@@ -356,30 +355,6 @@
       </div>
 
       <div id="ganadoresGrid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
-    </div>
-
-    <!-- ===================== RESUMEN ===================== -->
-    <div class="view" data-view="resumen">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🗂️ Resumen</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4">Web y Local separados — cada uno con su propia fuente.</p>
-
-      <div class="flex gap-1.5 mb-5" id="resumenFuente">
-        <button class="pill active" data-fuente="web">🌐 Web (Tiendanube, automático)</button>
-        <button class="pill" data-fuente="local">🧾 Local (Ninox, lo que cargaste)</button>
-      </div>
-
-      <div id="resumenTotalCard" class="mb-6"></div>
-
-      <div class="card p-5 mb-6" id="resumenGanadoresBox">
-        <div class="font-bold text-sm mb-3" id="resumenGanadoresTitulo">🏅 Top vendidos del mes</div>
-        <div id="resumenGanadoresLista" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"></div>
-      </div>
-
-      <div class="card p-5">
-        <div class="font-bold text-sm mb-1">📐 Por categoría</div>
-        <p class="text-xs text-slate-500 mb-3" id="resumenCategoriaDesc"></p>
-        <div id="resumenCategoriaTabla"></div>
-      </div>
     </div>
 
     <!-- ===================== MODAL REPOSICIÓN ===================== -->
@@ -483,19 +458,18 @@
   // Siempre se normaliza al lunes de esa semana, sea cual sea el día que se haya elegido.
   function semanaCargaKey() {
     const v = document.getElementById("objetivosSemanaCarga")?.value;
-    return v ? weekKey(new Date(v + "T00:00:00")) : semanaActualKey();
+    return v || semanaActualKey();
   }
   function renderSemanaCargaEstado() {
     const key = semanaCargaKey();
     const s = (objetivosLocal.semanas || {})[key];
     const el = document.getElementById("objetivosSemanaCargaEstado");
-    const lunes = new Date(key + "T00:00:00");
-    const domingo = new Date(lunes); domingo.setDate(lunes.getDate() + 6);
-    const opts = { day: "numeric", month: "short" };
-    const rango = `${lunes.toLocaleDateString("es-AR", opts)} – ${domingo.toLocaleDateString("es-AR", opts)}`;
+    const fecha = new Date(key + "T00:00:00");
+    const opts = { day: "numeric", month: "short", year: "numeric" };
+    const fechaTxt = fecha.toLocaleDateString("es-AR", opts);
     el.textContent = s
-      ? `Semana ${rango}: ya tiene ${fmtMoney(s.facturacion || 0)} · ${fmtNum(s.unidades || 0)} u. cargados — subir/guardar de nuevo lo reemplaza.`
-      : `Semana ${rango}: todavía sin datos cargados.`;
+      ? `${fechaTxt}: ya tiene ${fmtMoney(s.facturacion || 0)} · ${fmtNum(s.unidades || 0)} u. cargados — subir/guardar de nuevo lo reemplaza.`
+      : `${fechaTxt}: todavía sin datos cargados.`;
     renderSemanasResumen();
   }
   function renderSemanasResumen() {
@@ -503,13 +477,13 @@
     if (!cont) return;
     const semanas = objetivosLocal.semanas || {};
     const keys = Object.keys(semanas).sort().reverse();
-    if (!keys.length) { cont.innerHTML = '<div class="text-xs text-slate-400">Todavía no cargaste ninguna semana del local.</div>'; return; }
+    if (!keys.length) { cont.innerHTML = '<div class="text-xs text-slate-400">Todavía no cargaste ninguna fecha del local.</div>'; return; }
     const opts = { day: "numeric", month: "short" };
-    cont.innerHTML = `<div class="text-xs font-semibold text-slate-500 mb-2">Semanas cargadas del local</div>` + keys.map(key => {
+    cont.innerHTML = `<div class="text-xs font-semibold text-slate-500 mb-2">Fechas cargadas del local</div>` + keys.map(key => {
       const s = semanas[key];
-      const lunes = new Date(key + "T00:00:00");
+      const fecha = new Date(key + "T00:00:00");
       return `<div class="flex justify-between text-xs py-1 border-b border-slate-50 last:border-0">
-        <span class="text-slate-500">Semana del ${lunes.toLocaleDateString("es-AR", opts)}</span>
+        <span class="text-slate-500">${fecha.toLocaleDateString("es-AR", opts)}</span>
         <span><b>${fmtMoney(s.facturacion || 0)}</b> · ${fmtNum(s.unidades || 0)} u.</span>
       </div>`;
     }).join("");
@@ -571,23 +545,6 @@
       }
     });
     return { facturacion, unidades };
-  }
-  // Suma las categorías cargadas del local (por palabra clave) para todas las semanas del mes en curso.
-  function localTopArticulosMesActual() {
-    const semanas = objetivosLocal.semanas || {};
-    const now = new Date();
-    const out = {};
-    Object.keys(semanas).forEach(key => {
-      const fecha = new Date(key + "T00:00:00");
-      if (fecha.getMonth() !== now.getMonth() || fecha.getFullYear() !== now.getFullYear()) return;
-      Object.entries(semanas[key].articulos || {}).forEach(([desc, v]) => {
-        const prev = out[desc] || { facturacion: 0, unidades: 0 };
-        prev.facturacion += Number(v.facturacion || 0);
-        prev.unidades += Number(v.unidades || 0);
-        out[desc] = prev;
-      });
-    });
-    return Object.entries(out).map(([producto, v]) => ({ producto, ...v })).sort((a, b) => b.facturacion - a.facturacion);
   }
 
   function localCategoriasMesActual() {
@@ -961,14 +918,14 @@
 
         objetivosExcelParseado = { facturacion, unidades, categorias, articulos };
         document.getElementById("objetivosExcelPreview").className = "mt-3 border border-slate-200 rounded-lg p-3 bg-slate-50";
-        const lunesSel = new Date(semanaCargaKey() + "T00:00:00");
+        const fechaSel = new Date(semanaCargaKey() + "T00:00:00");
         const filasCat = Object.entries(categorias).sort((a, b) => b[1].facturacion - a[1].facturacion);
         document.getElementById("objetivosExcelPreview").innerHTML = `
           <div class="text-sm font-bold mb-2">${dataRows.length} artículos leídos · Venta Total ${fmtMoney(facturacion)} · ${fmtNum(unidades)} unid.</div>
           ${filasCat.length ? `<div class="space-y-0.5 mb-3">${filasCat.map(([cat, v]) => `<div class="flex justify-between text-xs ${cat === "Sin categoría" ? "text-red-500 font-semibold" : "text-slate-600"}"><span>${cat}</span><span>${fmtMoney(v.facturacion)} · ${fmtNum(v.unidades)}u</span></div>`).join("")}</div>` : ""}
           ${categorias["Sin categoría"] ? '<div class="text-xs text-red-500 mb-2">⚠️ Hay productos que no matchearon ninguna categoría — mandame esas descripciones y agrego la palabra clave.</div>' : ""}
-          <div class="text-xs text-slate-500 mb-3">Se va a guardar en la semana del <b>${lunesSel.toLocaleDateString("es-AR", { day: "numeric", month: "short" })}</b> (la que elegiste arriba).</div>
-          <button id="objetivosExcelConfirmar" class="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar y guardar en esa semana</button>
+          <div class="text-xs text-slate-500 mb-3">Se va a guardar con fecha <b>${fechaSel.toLocaleDateString("es-AR", { day: "numeric", month: "short" })}</b> (la que elegiste arriba).</div>
+          <button id="objetivosExcelConfirmar" class="px-4 py-2 text-sm font-semibold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">Confirmar y guardar</button>
         `;
         document.getElementById("objetivosExcelConfirmar").addEventListener("click", () => {
           const key = semanaCargaKey();
@@ -1497,7 +1454,16 @@
       else { va = a[campo]; vb = b[campo]; }
 
       if (typeof va === "string") return va.localeCompare(vb, "es") * mult;
-      if (va === vb) return b.unidades - a.unidades; // desempate: más vendido primero
+      if (va === vb) {
+        // Desempate: si no estamos ordenando ya por talle, usamos el orden lógico de talles
+        // (S, M, L, XL...) en vez de "más vendido primero", para que la grilla no salga
+        // en orden alfabético de talle cuando ordenás por color.
+        if (campo !== "talle") {
+          const ta = TALLE_ORDEN[a.talle] ?? 99, tb = TALLE_ORDEN[b.talle] ?? 99;
+          if (ta !== tb) return ta - tb;
+        }
+        return b.unidades - a.unidades;
+      }
       return (va - vb) * mult;
     });
 
@@ -1638,74 +1604,10 @@
   }
 
   function renderAll() {
-    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab(); renderResumenTab();
+    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
   }
 
   // ---------------- Resumen (Web y Local separados, misma estructura en las dos) ----------------
-  let resumenFuente = "web";
-  function renderResumenTab() {
-    if (!data) return;
-    document.getElementById("resumenFuente").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.fuente === resumenFuente));
-
-    const webActual = webActualPeriodoParaResumen();
-    const localActual = localActualPeriodoParaResumen();
-    const webObj = objetivoMensual("web");
-    const localObj = objetivoMensual("local");
-
-    if (resumenFuente === "web") {
-      document.getElementById("resumenTotalCard").innerHTML = renderObjetivoCard("Facturación Web — mes en curso", "Tiendanube, automático", `${rangoMesActual()} vs. objetivo mensual`, webActual, webObj);
-
-      const { ganadores } = calcularGanadoresBase("estemes");
-      const top = ganadores.sort((a, b) => (b.ventasPorPeriodo.estemes?.unidades || 0) - (a.ventasPorPeriodo.estemes?.unidades || 0)).slice(0, 6);
-      document.getElementById("resumenGanadoresLista").innerHTML = top.map(p => `
-        <div class="text-center">
-          <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100 rounded-lg mb-1" onerror="this.style.visibility='hidden'" />
-          <div class="text-[11px] font-semibold leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
-          <div class="text-[10px] text-slate-400">${fmtNum(p.ventasPorPeriodo.estemes?.unidades || 0)} u.</div>
-        </div>`).join("") || '<div class="text-slate-400 text-sm col-span-full">Sin datos todavía.</div>';
-
-      document.getElementById("resumenCategoriaDesc").textContent = "Solo Web (Tiendanube) — automático.";
-      renderObjetivosCategoria("resumenCategoriaTabla", "web");
-    } else {
-      document.getElementById("resumenTotalCard").innerHTML = renderObjetivoCard("Facturación Local — mes en curso", "Ninox, lo que cargaste", `Suma de semanas cargadas de ${nombreMesActual()} vs. objetivo mensual`, localActual, localObj);
-
-      const topLocal = localTopArticulosMesActual().slice(0, 6);
-      document.getElementById("resumenGanadoresLista").innerHTML = topLocal.length ? topLocal.map(p => `
-        <div class="text-center">
-          <div class="w-full aspect-square bg-slate-100 rounded-lg mb-1 flex items-center justify-center text-slate-300 text-2xl">🧾</div>
-          <div class="text-[11px] font-semibold leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
-          <div class="text-[10px] text-slate-400">${fmtNum(p.unidades)} u.</div>
-        </div>`).join("") : '<div class="text-slate-400 text-sm col-span-full">Sin semanas cargadas todavía este mes.</div>';
-
-      document.getElementById("resumenCategoriaDesc").textContent = "Solo Local (Ninox) — categorizado por palabra clave desde tus cargas de Excel. Solo suma semanas ya cargadas este mes.";
-      renderObjetivosCategoria("resumenCategoriaTabla", "local");
-    }
-  }
-  document.getElementById("resumenFuente").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    resumenFuente = btn.dataset.fuente; renderResumenTab();
-  });
-  // webActualPeriodo()/localActualPeriodo() dependen del toggle Mensual/Semanal/Personalizado de
-  // la pestaña Objetivos — acá en Resumen siempre queremos "mes en curso" sin importar en qué
-  // posición haya quedado ese toggle, así que se recalculan directo en vez de reusar esas.
-  function webActualPeriodoParaResumen() {
-    const kpis = (data.kpisPorPeriodo || {}).estemes || {};
-    return { facturacion: kpis.facturacionTotal || 0, unidades: kpis.unidadesVendidas || 0 };
-  }
-  function localActualPeriodoParaResumen() {
-    const semanas = objetivosLocal.semanas || {};
-    const now = new Date();
-    let facturacion = 0, unidades = 0;
-    Object.keys(semanas).forEach(key => {
-      const fecha = new Date(key + "T00:00:00");
-      if (fecha.getMonth() === now.getMonth() && fecha.getFullYear() === now.getFullYear()) {
-        facturacion += Number(semanas[key].facturacion || 0);
-        unidades += Number(semanas[key].unidades || 0);
-      }
-    });
-    return { facturacion, unidades };
-  }
-
   // ---------------- Ganadores (pestaña con foto + cortado vs. período) ----------------
   let ganadoresPeriodo = "mensual";
   let ganadoresCategoria = "";
@@ -1762,6 +1664,21 @@
     return { productos, promedio, ganadores };
   }
 
+  // Color con más stock disponible de un producto — para sugerir cuál conviene mostrar como
+  // foto principal si la idea es empujar lo que sobra en depósito, no necesariamente lo que ya
+  // es tendencia (la foto de portada hoy suele ser la del color que más vende, no la de más stock).
+  function colorConMasStock(p) {
+    const porColor = {};
+    (p.variantes || []).forEach(v => {
+      if (!v.color) return;
+      porColor[v.color] = (porColor[v.color] || 0) + (v.stock || 0);
+    });
+    const entries = Object.entries(porColor).filter(([, stock]) => stock > 0);
+    if (!entries.length) return null;
+    entries.sort((a, b) => b[1] - a[1]);
+    return { color: entries[0][0], stock: entries[0][1] };
+  }
+
   async function renderGanadoresTab() {
     if (!data) return;
     document.getElementById("ganadoresPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === ganadoresPeriodo));
@@ -1796,15 +1713,19 @@
       : "Sin ventas en este período.";
 
     const grid = document.getElementById("ganadoresGrid");
-    grid.innerHTML = ganadores.slice(0, 40).map(p => `
+    grid.innerHTML = ganadores.slice(0, 40).map(p => {
+      const masStock = colorConMasStock(p);
+      return `
       <div class="card overflow-hidden cursor-pointer hover:shadow-md transition-shadow" data-ganador-id="${p.id}" ${ganadoresOrdenModo === "manual" ? 'draggable="true"' : ""} onclick="if(!ganadoresArrastrando) abrirReposicion('${p.id}')">
         <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100" onerror="this.style.visibility='hidden'" />
         <div class="p-2.5">
           <div class="font-semibold text-xs text-slate-800 leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
           <div class="text-[11px] text-slate-500 mt-1">${fmtNum(p.ventasPorPeriodo[periodoVentas]?.unidades || 0)} vendidas</div>
+          ${masStock ? `<div class="text-[11px] text-indigo-600 font-semibold mt-0.5">📦 Más stock: ${masStock.color} (${fmtNum(masStock.stock)}u)</div>` : ""}
           <div class="text-[11px] text-slate-400 ganador-cortado">·</div>
         </div>
-      </div>`).join("") || '<div class="text-slate-400 text-sm col-span-full">Ningún producto supera el promedio todavía.</div>';
+      </div>`;
+    }).join("") || '<div class="text-slate-400 text-sm col-span-full">Ningún producto supera el promedio todavía.</div>';
 
     if (ganadoresOrdenModo === "manual") activarDragGanadores(grid);
 
