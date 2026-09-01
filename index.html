@@ -294,7 +294,10 @@
       <div id="objetivosCards" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"></div>
 
       <div class="card p-5 mb-6" id="objetivosCategoriaBox">
-        <div class="font-bold text-sm mb-1">📐 Por categoría — solo prenda real (web)</div>
+        <div class="flex items-center justify-between gap-2 mb-1">
+          <div class="font-bold text-sm">📐 Por categoría — solo prenda real (web)</div>
+          <button id="btnExportarExcelWeb" class="px-3 py-1.5 text-xs font-semibold bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition-colors flex-shrink-0 whitespace-nowrap">⬇️ Exportar Excel (por producto)</button>
+        </div>
         <p class="text-xs text-slate-500 mb-3">Filtrado a categorías de producto reales, ignorando etiquetas de promo/colección (Winter Sale, Liquidación, etc.). Útil para planificar cuánto cortar de cada categoría.</p>
         <div id="objetivosCategoriaTabla"></div>
         <p class="text-[11px] text-slate-400 mt-3">¿Falta o sobra alguna categoría en la lista? Avisame para ajustar el filtro.</p>
@@ -358,18 +361,23 @@
     <!-- ===================== RESUMEN ===================== -->
     <div class="view" data-view="resumen">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🗂️ Resumen</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-5">Todo junto: facturación del mes, ganadores y categorías — web + local.</p>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Web y Local separados — cada uno con su propia fuente.</p>
+
+      <div class="flex gap-1.5 mb-5" id="resumenFuente">
+        <button class="pill active" data-fuente="web">🌐 Web (Tiendanube, automático)</button>
+        <button class="pill" data-fuente="local">🧾 Local (Ninox, lo que cargaste)</button>
+      </div>
 
       <div id="resumenTotalCard" class="mb-6"></div>
 
-      <div class="card p-5 mb-6">
-        <div class="font-bold text-sm mb-3">🏅 Top ganadores del mes</div>
+      <div class="card p-5 mb-6" id="resumenGanadoresBox">
+        <div class="font-bold text-sm mb-3" id="resumenGanadoresTitulo">🏅 Top vendidos del mes</div>
         <div id="resumenGanadoresLista" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3"></div>
       </div>
 
       <div class="card p-5">
         <div class="font-bold text-sm mb-1">📐 Por categoría</div>
-        <p class="text-xs text-slate-500 mb-3">Web (automático) + Local (categorizado desde tus cargas de Excel).</p>
+        <p class="text-xs text-slate-500 mb-3" id="resumenCategoriaDesc"></p>
         <div id="resumenCategoriaTabla"></div>
       </div>
     </div>
@@ -565,6 +573,23 @@
     return { facturacion, unidades };
   }
   // Suma las categorías cargadas del local (por palabra clave) para todas las semanas del mes en curso.
+  function localTopArticulosMesActual() {
+    const semanas = objetivosLocal.semanas || {};
+    const now = new Date();
+    const out = {};
+    Object.keys(semanas).forEach(key => {
+      const fecha = new Date(key + "T00:00:00");
+      if (fecha.getMonth() !== now.getMonth() || fecha.getFullYear() !== now.getFullYear()) return;
+      Object.entries(semanas[key].articulos || {}).forEach(([desc, v]) => {
+        const prev = out[desc] || { facturacion: 0, unidades: 0 };
+        prev.facturacion += Number(v.facturacion || 0);
+        prev.unidades += Number(v.unidades || 0);
+        out[desc] = prev;
+      });
+    });
+    return Object.entries(out).map(([producto, v]) => ({ producto, ...v })).sort((a, b) => b.facturacion - a.facturacion);
+  }
+
   function localCategoriasMesActual() {
     const semanas = objetivosLocal.semanas || {};
     const now = new Date();
@@ -684,10 +709,39 @@
     return CATEGORIAS_REALES.some(c => n === c || n.includes(c));
   }
 
-  function renderObjetivosCategoria(contId) {
+  // Exporta un Excel con la venta del mes en curso, un producto por fila, con su categoría
+  // principal ya corregida (sin el doble conteo de categorías múltiples de Tiendanube) — para
+  // pasarle a Claude un dato completo y real de la web, igual que se hace con el Excel del local.
+  function exportarExcelProductosWeb() {
+    if (!data || !data.productos) { alert("Todavía no cargaron los datos."); return; }
+    const filas = data.productos
+      .filter(p => p.ventasPorPeriodo && p.ventasPorPeriodo.estemes && p.ventasPorPeriodo.estemes.unidades > 0)
+      .map(p => {
+        const v = p.ventasPorPeriodo.estemes;
+        return {
+          Producto: p.producto,
+          Categoría: p.categoria || "Sin categoría",
+          Unidades: v.unidades,
+          Facturación: Math.round(v.facturacion),
+          "Precio Promedio": v.unidades > 0 ? Math.round(v.facturacion / v.unidades) : 0,
+        };
+      })
+      .sort((a, b) => b.Facturación - a.Facturación);
+    if (!filas.length) { alert("No hay ventas cargadas para este mes todavía."); return; }
+    const ws = XLSX.utils.json_to_sheet(filas);
+    ws["!cols"] = [{ wch: 40 }, { wch: 22 }, { wch: 10 }, { wch: 14 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Web por producto");
+    const hoy = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `Web_por_producto_${hoy}.xlsx`);
+  }
+  document.getElementById("btnExportarExcelWeb").addEventListener("click", exportarExcelProductosWeb);
+
+  function renderObjetivosCategoria(contId, fuente) {
+    fuente = fuente || "ambas";
     const cont = document.getElementById(contId || "objetivosCategoriaTabla");
     if (!cont) return;
-    const catsWeb = (data.porCategoriaPorPeriodo || {}).estemes || [];
+    const catsWeb = fuente === "local" ? [] : ((data.porCategoriaPorPeriodo || {}).estemes || []);
     const combinado = {};
     let webNoMatch = { facturacion: 0, unidades: 0 };
     catsWeb.forEach(c => {
@@ -700,7 +754,7 @@
         webNoMatch.unidades += c.unidades;
       }
     });
-    const catsLocal = localCategoriasMesActual();
+    const catsLocal = fuente === "web" ? {} : localCategoriasMesActual();
     Object.entries(catsLocal).forEach(([cat, v]) => {
       combinado[cat] = combinado[cat] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
       combinado[cat].local.facturacion += v.facturacion;
@@ -885,20 +939,27 @@
 
         let facturacion = 0, unidades = 0;
         const categorias = {};
+        const articulos = {};
         dataRows.forEach(r => {
           const u = parseNumAR(r[idxCant]);
           const f = parseNumAR(r[idxVentaTotal]);
           unidades += u;
           facturacion += f;
           if (idxDesc !== -1) {
-            const cat = categorizarDescripcionLocal(r[idxDesc]);
+            const desc = String(r[idxDesc] || "").trim();
+            const cat = categorizarDescripcionLocal(desc);
             const prev = categorias[cat] || { facturacion: 0, unidades: 0 };
             prev.facturacion += f; prev.unidades += u;
             categorias[cat] = prev;
+            if (desc) {
+              const prevA = articulos[desc] || { facturacion: 0, unidades: 0 };
+              prevA.facturacion += f; prevA.unidades += u;
+              articulos[desc] = prevA;
+            }
           }
         });
 
-        objetivosExcelParseado = { facturacion, unidades, categorias };
+        objetivosExcelParseado = { facturacion, unidades, categorias, articulos };
         document.getElementById("objetivosExcelPreview").className = "mt-3 border border-slate-200 rounded-lg p-3 bg-slate-50";
         const lunesSel = new Date(semanaCargaKey() + "T00:00:00");
         const filasCat = Object.entries(categorias).sort((a, b) => b[1].facturacion - a[1].facturacion);
@@ -1580,29 +1641,50 @@
     renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab(); renderResumenTab();
   }
 
-  // ---------------- Resumen (todo junto: total, ganadores, categorías) ----------------
+  // ---------------- Resumen (Web y Local separados, misma estructura en las dos) ----------------
+  let resumenFuente = "web";
   function renderResumenTab() {
     if (!data) return;
+    document.getElementById("resumenFuente").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.fuente === resumenFuente));
+
     const webActual = webActualPeriodoParaResumen();
     const localActual = localActualPeriodoParaResumen();
     const webObj = objetivoMensual("web");
     const localObj = objetivoMensual("local");
-    const totalActual = { facturacion: webActual.facturacion + localActual.facturacion, unidades: webActual.unidades + localActual.unidades };
-    const totalObj = { facturacion: webObj.facturacion + localObj.facturacion, unidades: webObj.unidades + localObj.unidades };
-    document.getElementById("resumenTotalCard").innerHTML = renderObjetivoCard("Total facturación — mes en curso", "Web + Local", `${rangoMesActual()} vs. objetivo mensual`, totalActual, totalObj);
 
-    // Top ganadores (mismo cálculo que la pestaña Ganadores, mes en curso, sin filtro/orden manual).
-    const { ganadores } = calcularGanadoresBase("estemes");
-    const top = ganadores.sort((a, b) => (b.ventasPorPeriodo.estemes?.unidades || 0) - (a.ventasPorPeriodo.estemes?.unidades || 0)).slice(0, 6);
-    document.getElementById("resumenGanadoresLista").innerHTML = top.map(p => `
-      <div class="text-center">
-        <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100 rounded-lg mb-1" onerror="this.style.visibility='hidden'" />
-        <div class="text-[11px] font-semibold leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
-        <div class="text-[10px] text-slate-400">${fmtNum(p.ventasPorPeriodo.estemes?.unidades || 0)} u.</div>
-      </div>`).join("") || '<div class="text-slate-400 text-sm col-span-full">Sin datos todavía.</div>';
+    if (resumenFuente === "web") {
+      document.getElementById("resumenTotalCard").innerHTML = renderObjetivoCard("Facturación Web — mes en curso", "Tiendanube, automático", `${rangoMesActual()} vs. objetivo mensual`, webActual, webObj);
 
-    renderObjetivosCategoria("resumenCategoriaTabla");
+      const { ganadores } = calcularGanadoresBase("estemes");
+      const top = ganadores.sort((a, b) => (b.ventasPorPeriodo.estemes?.unidades || 0) - (a.ventasPorPeriodo.estemes?.unidades || 0)).slice(0, 6);
+      document.getElementById("resumenGanadoresLista").innerHTML = top.map(p => `
+        <div class="text-center">
+          <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100 rounded-lg mb-1" onerror="this.style.visibility='hidden'" />
+          <div class="text-[11px] font-semibold leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
+          <div class="text-[10px] text-slate-400">${fmtNum(p.ventasPorPeriodo.estemes?.unidades || 0)} u.</div>
+        </div>`).join("") || '<div class="text-slate-400 text-sm col-span-full">Sin datos todavía.</div>';
+
+      document.getElementById("resumenCategoriaDesc").textContent = "Solo Web (Tiendanube) — automático.";
+      renderObjetivosCategoria("resumenCategoriaTabla", "web");
+    } else {
+      document.getElementById("resumenTotalCard").innerHTML = renderObjetivoCard("Facturación Local — mes en curso", "Ninox, lo que cargaste", `Suma de semanas cargadas de ${nombreMesActual()} vs. objetivo mensual`, localActual, localObj);
+
+      const topLocal = localTopArticulosMesActual().slice(0, 6);
+      document.getElementById("resumenGanadoresLista").innerHTML = topLocal.length ? topLocal.map(p => `
+        <div class="text-center">
+          <div class="w-full aspect-square bg-slate-100 rounded-lg mb-1 flex items-center justify-center text-slate-300 text-2xl">🧾</div>
+          <div class="text-[11px] font-semibold leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
+          <div class="text-[10px] text-slate-400">${fmtNum(p.unidades)} u.</div>
+        </div>`).join("") : '<div class="text-slate-400 text-sm col-span-full">Sin semanas cargadas todavía este mes.</div>';
+
+      document.getElementById("resumenCategoriaDesc").textContent = "Solo Local (Ninox) — categorizado por palabra clave desde tus cargas de Excel. Solo suma semanas ya cargadas este mes.";
+      renderObjetivosCategoria("resumenCategoriaTabla", "local");
+    }
   }
+  document.getElementById("resumenFuente").addEventListener("click", e => {
+    const btn = e.target.closest("button"); if (!btn) return;
+    resumenFuente = btn.dataset.fuente; renderResumenTab();
+  });
   // webActualPeriodo()/localActualPeriodo() dependen del toggle Mensual/Semanal/Personalizado de
   // la pestaña Objetivos — acá en Resumen siempre queremos "mes en curso" sin importar en qué
   // posición haya quedado ese toggle, así que se recalculan directo en vez de reusar esas.
