@@ -201,18 +201,40 @@ function calcularPorDia(orders, desde, hasta) {
   return acc;
 }
 
+// Categorías reales de prenda — Tiendanube permite asignarle a un producto varias categorías
+// a la vez (la real + etiquetas de promo/colección tipo "Winter Sale"), así que si sumáramos
+// la venta a CADA categoría del producto, la misma venta se contaría varias veces y el total
+// nunca cerraría contra la facturación real. Por eso cada producto aporta su venta a UNA sola
+// categoría: la primera de esta lista que tenga asignada.
+const CATEGORIAS_REALES = [
+  "remeras", "tops", "tejidos", "sweaters", "tejidos | sweaters", "buzos",
+  "capsula importados", "cápsula importados", "gamulanes", "camperas", "gamulanes / camperas", "gamulanes/camperas",
+  "pantalones", "shorts", "pantalones - shorts", "pantalones/shorts", "body", "jeans", "jean",
+  "accesorios", "blazers", "camisas", "blazers / camisas", "blazers/camisas", "vestidos",
+];
+function normalizarCat(s) {
+  return (s || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+function categoriaPrincipal(categorias) {
+  const lista = categorias || [];
+  const real = lista.find((c) => {
+    const n = normalizarCat(c);
+    return CATEGORIAS_REALES.some((r) => n === r || n.includes(r));
+  });
+  if (real) return real;
+  return lista[0] || "Sin categoría";
+}
+
 function calcularPorCategoria(orders, desde, hasta, productMeta, top = 8) {  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
   const acc = new Map();
   pagados.forEach((o) => {
     (o.products || []).forEach((li) => {
       const meta = productMeta.get(li.product_id);
-      const categorias = (meta && meta.categorias) || ["Sin categoría"];
-      categorias.forEach((categoria) => {
-        const prev = acc.get(categoria) || { categoria, unidades: 0, facturacion: 0 };
-        prev.unidades += Number(li.quantity || 0);
-        prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
-        acc.set(categoria, prev);
-      });
+      const categoria = categoriaPrincipal(meta && meta.categorias);
+      const prev = acc.get(categoria) || { categoria, unidades: 0, facturacion: 0 };
+      prev.unidades += Number(li.quantity || 0);
+      prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
+      acc.set(categoria, prev);
     });
   });
   return Array.from(acc.values()).sort((a, b) => b.unidades - a.unidades).slice(0, top);
