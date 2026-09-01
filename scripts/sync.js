@@ -355,7 +355,7 @@ function serializarProductos(products, ventasPorProducto, periods) {
     const nombre = p.name?.es || p.name;
     const imagen = p.images?.[0]?.src || null;
     const categoriasArr = (p.categories || []).map((c) => c.name?.es || c.name).filter(Boolean);
-    const categoria = categoriasArr[0] || "Sin categoría";
+    const categoria = categoriaPrincipal(categoriasArr);
     const categorias = categoriasArr.length ? categoriasArr : ["Sin categoría"];
     const publicado = p.published !== false;
     const tags = (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
