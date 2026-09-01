@@ -689,14 +689,19 @@
     if (!cont) return;
     const catsWeb = (data.porCategoriaPorPeriodo || {}).estemes || [];
     const combinado = {};
-    catsWeb.filter(c => esCategoriaReal(c.categoria)).forEach(c => {
-      combinado[c.categoria] = combinado[c.categoria] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
-      combinado[c.categoria].web.facturacion += c.facturacion;
-      combinado[c.categoria].web.unidades += c.unidades;
+    let webNoMatch = { facturacion: 0, unidades: 0 };
+    catsWeb.forEach(c => {
+      if (esCategoriaReal(c.categoria)) {
+        combinado[c.categoria] = combinado[c.categoria] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
+        combinado[c.categoria].web.facturacion += c.facturacion;
+        combinado[c.categoria].web.unidades += c.unidades;
+      } else {
+        webNoMatch.facturacion += c.facturacion;
+        webNoMatch.unidades += c.unidades;
+      }
     });
     const catsLocal = localCategoriasMesActual();
     Object.entries(catsLocal).forEach(([cat, v]) => {
-      if (cat === "Sin categoría") return;
       combinado[cat] = combinado[cat] || { web: { facturacion: 0, unidades: 0 }, local: { facturacion: 0, unidades: 0 } };
       combinado[cat].local.facturacion += v.facturacion;
       combinado[cat].local.unidades += v.unidades;
@@ -705,26 +710,34 @@
     const filas = Object.entries(combinado).map(([cat, v]) => {
       const facturacion = v.web.facturacion + v.local.facturacion;
       const unidades = v.web.unidades + v.local.unidades;
-      return { categoria: cat, facturacion, unidades, precioProm: unidades > 0 ? facturacion / unidades : 0 };
+      return { categoria: cat, facturacion, unidades, precioProm: unidades > 0 ? facturacion / unidades : 0, sinIdentificar: false };
     }).sort((a, b) => b.facturacion - a.facturacion);
+    if (webNoMatch.unidades > 0 || webNoMatch.facturacion > 0) {
+      filas.push({ categoria: "⚠️ Web — sin identificar (colecciones/promos u otras categorías)", facturacion: webNoMatch.facturacion, unidades: webNoMatch.unidades, precioProm: webNoMatch.unidades > 0 ? webNoMatch.facturacion / webNoMatch.unidades : 0, sinIdentificar: true });
+    }
 
     if (!filas.length) {
       cont.innerHTML = '<div class="text-slate-400 text-sm">No encontré categorías reales en los datos de este mes — puede que los nombres no coincidan con el filtro. Avisame los nombres exactos y lo ajusto.</div>';
       return;
     }
+    const totalFact = filas.reduce((s, f) => s + f.facturacion, 0);
     cont.innerHTML = `<table class="w-full text-sm">
       <thead><tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100">
         <th class="py-2">Categoría</th><th class="py-2 text-right">Unidades</th><th class="py-2 text-right">Facturación</th><th class="py-2 text-right">Precio prom.</th>
       </tr></thead>
       <tbody>${filas.map(f => `
-        <tr class="border-b border-slate-50">
-          <td class="py-2 font-semibold">${f.categoria}</td>
+        <tr class="border-b border-slate-50${f.categoria === "Sin categoría" || f.sinIdentificar ? " bg-red-50" : ""}">
+          <td class="py-2 font-semibold${f.categoria === "Sin categoría" || f.sinIdentificar ? " text-red-500" : ""}">${f.categoria}</td>
           <td class="py-2 text-right">${fmtNum(f.unidades)}</td>
           <td class="py-2 text-right">${fmtMoney(f.facturacion)}</td>
           <td class="py-2 text-right">${fmtMoney(f.precioProm)}</td>
         </tr>`).join("")}
+        <tr class="border-t-2 border-slate-200">
+          <td class="py-2 font-bold">Total</td><td></td>
+          <td class="py-2 text-right font-bold">${fmtMoney(totalFact)}</td><td></td>
+        </tr>
       </tbody></table>
-      <p class="text-[11px] text-slate-400 mt-2">Web (automático) + Local (categorizado por palabra clave desde tus cargas de Excel). Solo suma semanas del local ya cargadas este mes.</p>`;
+      <p class="text-[11px] text-slate-400 mt-2">Web (automático) + Local (categorizado por palabra clave desde tus cargas de Excel). Solo suma semanas del local ya cargadas este mes. Las filas en rojo son plata que no se pudo asignar a ninguna categoría real — avisame qué productos son para ajustar el filtro/las palabras clave.</p>`;
   }
 
   function renderObjetivos() {
