@@ -373,7 +373,7 @@
         </div>
         <div id="reposicionFabricaEstado" class="text-xs mb-3"></div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
           <div class="card p-4">
             <div class="font-bold text-sm mb-2">🎨 Colores a reponer</div>
             <div id="reposicionColores" class="space-y-1.5 text-sm"></div>
@@ -382,6 +382,11 @@
             <div class="font-bold text-sm mb-2">📐 Talles para hacer énfasis</div>
             <div id="reposicionTalles" class="space-y-1.5 text-sm"></div>
           </div>
+        </div>
+
+        <div class="card p-4 mb-5">
+          <div class="font-bold text-sm mb-2">📦 Stock por color</div>
+          <div id="reposicionStockColor" class="space-y-1.5 text-sm"></div>
         </div>
 
         <div class="card overflow-hidden">
@@ -1284,7 +1289,12 @@
       const diasStock = velocidadDiaria > 0 ? g.stock / velocidadDiaria : null;
       return { ...g, diasStock, ...clasificarPrioridad(g.unidades, g.stock, diasStock) };
     });
-    arr.sort((a, b) => a.orden - b.orden || b.unidades - a.unidades);
+    if (campo === "talle") {
+      // "Talles para hacer énfasis": orden lógico de talle (S, M, L, XL...), no por prioridad.
+      arr.sort((a, b) => (TALLE_ORDEN[a.talle] ?? 99) - (TALLE_ORDEN[b.talle] ?? 99));
+    } else {
+      arr.sort((a, b) => a.orden - b.orden || b.unidades - a.unidades);
+    }
     return arr;
   }
 
@@ -1314,6 +1324,14 @@
 
     document.getElementById("reposicionColores").innerHTML = porColor.map(g => filaResumen(g, "color")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
     document.getElementById("reposicionTalles").innerHTML = porTalle.map(g => filaResumen(g, "talle")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
+
+    // Stock por color, de más a menos — para ver de un vistazo dónde queda concentrado el stock actual.
+    const stockPorColor = [...porColor].sort((a, b) => b.stock - a.stock);
+    document.getElementById("reposicionStockColor").innerHTML = stockPorColor.map(g => `
+      <div class="flex items-center justify-between gap-2">
+        <span class="truncate">${g.color}</span>
+        <span class="text-xs text-slate-500 flex-shrink-0">${fmtNum(g.stock)} u.</span>
+      </div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
 
     reposicionFilas = filas;
     reposicionOrdenCampo = "prioridad";
@@ -1453,18 +1471,18 @@
       else if (campo === "diasStock") { va = a.diasStock === null ? Infinity : a.diasStock; vb = b.diasStock === null ? Infinity : b.diasStock; }
       else { va = a[campo]; vb = b[campo]; }
 
-      if (typeof va === "string") return va.localeCompare(vb, "es") * mult;
-      if (va === vb) {
-        // Desempate: si no estamos ordenando ya por talle, usamos el orden lógico de talles
-        // (S, M, L, XL...) en vez de "más vendido primero", para que la grilla no salga
-        // en orden alfabético de talle cuando ordenás por color.
-        if (campo !== "talle") {
-          const ta = TALLE_ORDEN[a.talle] ?? 99, tb = TALLE_ORDEN[b.talle] ?? 99;
-          if (ta !== tb) return ta - tb;
-        }
+      const result = typeof va === "string" ? va.localeCompare(vb, "es") * mult : (va - vb) * mult;
+
+      // Desempate: si no estamos ordenando ya por talle, usamos el orden lógico de talles
+      // (S, M, L, XL...) en vez de "más vendido primero", para que la grilla no salga
+      // en orden alfabético de talle cuando ordenás por color (esto antes no se aplicaba
+      // en columnas de texto porque el return anterior cortaba antes de llegar acá).
+      if (result === 0 && campo !== "talle") {
+        const ta = TALLE_ORDEN[a.talle] ?? 99, tb = TALLE_ORDEN[b.talle] ?? 99;
+        if (ta !== tb) return ta - tb;
         return b.unidades - a.unidades;
       }
-      return (va - vb) * mult;
+      return result;
     });
 
     document.getElementById("reposicionTablaHead").innerHTML = `
