@@ -37,6 +37,7 @@
   </div>
   <nav class="flex-1 py-4 px-2 space-y-0.5" id="sidebarNav">
     <div class="navitem active" data-view="dashboard">📊 Dashboard</div>
+    <div class="navitem" data-view="foco">🔎 Foco</div>
     <div class="navitem" data-view="stock">📦 Stock general</div>
     <div class="navitem" data-view="ultimas">⚠️ Últimas unidades</div>
     <div class="navitem" data-view="vendidos">🏆 Productos vendidos</div>
@@ -109,6 +110,15 @@
     </div>
 
     <!-- ===================== STOCK GENERAL ===================== -->
+    <div class="view" data-view="foco">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🔎 Foco</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Hasta 6 categorías: los 6 artículos con más stock y los 6 más vendidos de cada una.</p>
+      <div class="flex flex-wrap gap-2 items-center mb-3"><span class="text-xs text-slate-500 font-medium">Vendidos en los últimos:</span><div class="flex flex-wrap gap-1.5" id="focoPeriodo"></div></div>
+      <div class="flex flex-wrap gap-1.5 items-center mb-5" id="focoCats"></div>
+      <div id="focoLista" class="space-y-4"></div>
+      <p class="text-[11px] text-slate-400 mt-4">En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer).</p>
+    </div>
+
     <div class="view" data-view="stock">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📦 Stock general</h1>
       <p class="text-sm text-slate-500 mt-1 mb-4" id="stockCount"></p>
@@ -1001,6 +1011,50 @@
     window.scrollTo(0, 0);
   }
 
+  // ---------------- Foco: 6 categorías × (6 con más stock, 6 más vendidos) ----------------
+  // Las categorías elegidas se guardan en Firebase (dashboard_foco) para verlas igual en cualquier dispositivo.
+  let focoCats = [], focoPeriodo = "30dias", focoAgregando = false;
+  const FOCO_PERIODOS = [["7dias","7 días"],["15dias","15 días"],["30dias","30 días"],["45dias","45 días"],["60dias","60 días"]];
+  db.ref("dashboard_foco").on("value", snap => { const v = snap.val() || {}; focoCats = (v.categorias || []).filter(Boolean); if (v.periodo) focoPeriodo = v.periodo; if (data) renderFoco(); });
+  function focoGuardar() { db.ref("dashboard_foco").set({ categorias: focoCats, periodo: focoPeriodo }); }
+  const focoEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function renderFoco() {
+    if (!document.getElementById("focoLista")) return;
+    const sinDato = !(data.productos || []).some(p => p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo]);
+    document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
+    const todas = categoriasUnicas();
+    document.getElementById("focoCats").innerHTML = focoCats.map((c, i) => `<span class="pill active">${focoEsc(c)} <span data-fq="${i}" style="cursor:pointer;margin-left:4px">✕</span></span>`).join("")
+      + (focoCats.length < 6 ? (focoAgregando
+        ? `<select id="focoAdd" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Elegí una categoría…</option>${todas.filter(c => !focoCats.includes(c)).map(c => `<option value="${focoEsc(c)}">${focoEsc(c)}</option>`).join("")}</select>`
+        : `<button class="pill" id="focoMas">+ Agregar categoría (${focoCats.length} de 6)</button>`) : "");
+    const vend = p => (p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo] && p.ventasPorPeriodo[focoPeriodo].unidades) || 0;
+    const prods = (data.productos || []).filter(p => p.publicado);
+    const fila = (p, modo) => {
+      const v = vend(p), st = p.stockTotal || 0;
+      const empujar = st >= 20 && v <= 2, reponer = v >= 5 && st <= Math.max(10, v);
+      const marca = empujar ? "border-red-300 bg-red-50" : reponer ? "border-amber-300 bg-amber-50" : "border-slate-200";
+      return `<div class="border ${marca} rounded-xl p-2 flex flex-col">
+        <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100 mb-2" onerror="this.style.visibility='hidden'" />
+        <div class="text-xs font-semibold leading-tight mb-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${focoEsc(p.producto)}</div>
+        <div class="text-xs text-slate-600 mt-auto">${modo === "stock" ? `<b>${fmtNum(st)}</b> u. · ${fmtNum(v)} vend.` : `<b>${fmtNum(v)}</b> vend. · ${fmtNum(st)} u.`}</div></div>`;
+    };
+    document.getElementById("focoLista").innerHTML = sinDato
+      ? `<div class="card p-4 text-sm text-slate-500">Todavía no hay datos de ventas para ${FOCO_PERIODOS.find(x => x[0] === focoPeriodo)[1]}. Se completan en la próxima actualización automática (cada hora).</div>`
+      : (focoCats.length ? focoCats.map(cat => {
+        const ps = prods.filter(p => productoEnCategoria(p, cat));
+        const stockTot = ps.reduce((s, p) => s + (p.stockTotal || 0), 0), vendTot = ps.reduce((s, p) => s + vend(p), 0);
+        const masStock = [...ps].sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0)).slice(0, 6);
+        const masVend = [...ps].filter(p => vend(p) > 0).sort((a, b) => vend(b) - vend(a)).slice(0, 6);
+        return `<div class="card p-4"><div class="flex justify-between items-baseline mb-3"><div class="font-bold">${focoEsc(cat)}</div><div class="text-xs text-slate-500">${fmtNum(stockTot)} u. en stock · ${fmtNum(vendTot)} vendidas</div></div>
+          <div class="text-xs font-semibold text-slate-500 mb-2">Más stock</div><div class="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">${masStock.map(p => fila(p, "stock")).join("") || '<div class="text-xs text-slate-400">Sin productos.</div>'}</div>
+          <div class="text-xs font-semibold text-slate-500 mb-2">Más vendidos</div><div class="grid grid-cols-3 md:grid-cols-6 gap-2">${masVend.map(p => fila(p, "vend")).join("") || '<div class="text-xs text-slate-400">Sin ventas en el período.</div>'}</div></div>`;
+      }).join("") : '<div class="card p-4 text-sm text-slate-500">Elegí hasta 6 categorías arriba.</div>');
+    document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
+    document.querySelectorAll("[data-fq]").forEach(b => b.onclick = () => { focoCats.splice(Number(b.dataset.fq), 1); focoGuardar(); renderFoco(); });
+    const mas = document.getElementById("focoMas"); if (mas) mas.onclick = () => { focoAgregando = true; renderFoco(); };
+    const add = document.getElementById("focoAdd"); if (add) { add.focus(); add.onchange = () => { if (add.value && focoCats.length < 6) { focoCats.push(add.value); focoGuardar(); } focoAgregando = false; renderFoco(); }; }
+  }
+
   // ---------------- Dashboard ----------------
   function renderDashboard() {
     pillsHtml("pillsPeriodoDash", periodoDash, (k) => { periodoDash = k; renderDashboard(); });
@@ -1085,7 +1139,7 @@
       const valorLine = stockOrden === "mayorValor" ? `<div class="text-xs text-slate-500 font-semibold mt-0.5">Valor en stock: ${fmtMoney(p.stockValorTotal)}</div>` : "";
       return `
       <div class="card p-4 flex items-center gap-4">
-        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
+        <img src="${p.imagen || ""}" class="w-24 h-28 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
         <div class="flex-1 min-w-0">
           <div class="font-bold text-sm mb-1.5">${p.producto}</div>
           <div class="flex flex-wrap gap-1.5 items-center">${chips}${extra}</div>
@@ -1622,7 +1676,7 @@
   }
 
   function renderAll() {
-    renderDashboard(); renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
+    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
   }
 
   // ---------------- Resumen (Web y Local separados, misma estructura en las dos) ----------------
