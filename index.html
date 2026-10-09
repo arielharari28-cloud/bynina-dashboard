@@ -38,6 +38,7 @@
   <nav class="flex-1 py-4 px-2 space-y-0.5" id="sidebarNav">
     <div class="navitem active" data-view="dashboard">📊 Dashboard</div>
     <div class="navitem" data-view="foco">🔎 Foco</div>
+    <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadge" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:auto"></span></div>
     <div class="navitem" data-view="stock">📦 Stock general</div>
     <div class="navitem" data-view="ultimas">⚠️ Últimas unidades</div>
     <div class="navitem" data-view="vendidos">🏆 Productos vendidos</div>
@@ -112,11 +113,19 @@
     <!-- ===================== STOCK GENERAL ===================== -->
     <div class="view" data-view="foco">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🔎 Foco</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4">Las categorías que elijas, en el orden que quieras (◀ ▶): los 6 artículos con más stock y los 6 más vendidos de cada una.</p>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Lo que clasificaste a mano en 🏷️ Clasificar, por grupo, tendencia o categoría. “Tienda Nube” es la vista anterior, por las categorías de la web.</p>
+      <div class="flex flex-wrap gap-2 items-center mb-3" id="focoModoBar"></div>
       <div class="flex flex-wrap gap-2 items-center mb-3"><span class="text-xs text-slate-500 font-medium">Vendidos en los últimos:</span><div class="flex flex-wrap gap-1.5" id="focoPeriodo"></div></div>
       <div class="flex flex-wrap gap-1.5 items-center mb-5" id="focoCats"></div>
       <div id="focoLista" class="space-y-4"></div>
-      <p class="text-[11px] text-slate-400 mt-4">En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer).</p>
+      <p class="text-[11px] text-slate-400 mt-4" id="focoLeyenda"></p>
+    </div>
+
+    <div class="view" data-view="clasificar">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏷️ Clasificar mercadería</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">A cada producto: su categoría, un grupo (New In, Sale, Básicos o Más vendidos — uno solo) y las tendencias que quieras. Es lo que usa el Foco. Rechazar lo saca del foco.</p>
+      <div class="flex flex-wrap gap-2 items-center mb-4"><div id="clasifTabs" class="flex flex-wrap gap-1.5"></div><input id="clasifBusca" type="text" placeholder="Buscar producto…" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[180px]" /></div>
+      <div id="clasifLista" class="space-y-3"></div>
     </div>
 
     <div class="view" data-view="stock">
@@ -1011,15 +1020,158 @@
     window.scrollTo(0, 0);
   }
 
+
+  // ---------------- Clasificación manual de la mercadería (oct 2026) ----------------
+  // Cada producto de Tienda Nube se clasifica a mano (no depende de las categorías de TN):
+  //  - base: categoría de prenda (una sola, obligatoria)
+  //  - grupo: New In / Sale / Básicos / Más vendidos (como mucho uno: no pueden coincidir)
+  //  - tendencias: las que se vayan creando (varias, combinan con cualquier grupo)
+  //  - rechazado: no va al foco
+  // Firebase: dashboard_clasif/items/{productId} y dashboard_clasif/cfg {bases, tendencias}.
+  const CL_GRUPOS = ["New In", "Sale", "Básicos", "Más vendidos"];
+  const CL_BASES_DEF = ["Remera", "Top", "Body", "Buzo", "Campera", "Pantalón", "Short", "Jean", "Pollera", "Vestido", "Conjunto"];
+  let clItems = {}, clCfg = { bases: CL_BASES_DEF, tendencias: [] }, clTab = "asignar", clDraft = {}, clBusca = "";
+  let focoModo = "grupo", focoOcultarSin = false; const focoBaseFiltro = {};
+  db.ref("dashboard_clasif/items").on("value", s => { clItems = s.val() || {}; if (data) { renderClasif(); renderFoco(); } });
+  db.ref("dashboard_clasif/cfg").on("value", s => { const v = s.val() || {}; clCfg = { bases: (v.bases && v.bases.length) ? v.bases : CL_BASES_DEF, tendencias: v.tendencias || [] }; if (data) { renderClasif(); renderFoco(); } });
+  db.ref("dashboard_foco/modo").on("value", s => { if (s.val()) focoModo = s.val(); if (data) renderFoco(); });
+  db.ref("dashboard_foco/ocultarSinStock").on("value", s => { focoOcultarSin = !!s.val(); if (data) renderFoco(); });
+  const clVend = (p, per) => (p.ventasPorPeriodo && p.ventasPorPeriodo[per || focoPeriodo] && p.ventasPorPeriodo[per || focoPeriodo].unidades) || 0;
+  const clDe = p => clItems[p.id] || null;
+  const clProds = () => (data && data.productos || []).filter(p => p.publicado && p.id != null);
+  const clAsignados = () => clProds().filter(p => { const c = clDe(p); return c && c.base && !c.rechazado; });
+  function clParaAsignar() {
+    return clProds().filter(p => { const c = clDe(p); return (p.stockTotal || 0) > 0 && !(c && (c.base || c.rechazado)); })
+      .sort((a, b) => String(b.creado || "").localeCompare(String(a.creado || "")));
+  }
+  // Sugeridos para "Más vendidos": los más vendidos de 30 días con stock (top 20) que no están marcados.
+  function clTopVentas() { return clProds().filter(p => !(clDe(p) || {}).rechazado && (p.stockTotal || 0) > 0 && clVend(p, "30dias") > 0).sort((a, b) => clVend(b, "30dias") - clVend(a, "30dias")).slice(0, 20); }
+  const clDias = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
+  function clEstado(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return "sin"; if (v >= 5 && st <= Math.max(10, v)) return "rep"; return ""; }
+
+  function clCard(p) {
+    const c = clDe(p) || {}, d = clDraft[p.id] || (clDraft[p.id] = { base: c.base || "", grupo: c.grupo || "", tendencias: Object.keys(c.tendencias || {}) });
+    const dias = clDias(p.creado), top = clTopVentas().some(x => x.id === p.id);
+    const chip = (on, attrs, txt, extra = "") => `<button class="pill ${on ? "active" : ""}" ${attrs} style="${extra}">${focoEsc(txt)}</button>`;
+    return `<div class="card p-3" style="display:grid;grid-template-columns:88px 1fr;gap:12px">
+      <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100" onerror="this.style.visibility='hidden'" />
+      <div class="min-w-0">
+        <div class="flex justify-between gap-2 flex-wrap items-start">
+          <div class="min-w-0"><span class="font-bold text-sm">${focoEsc(p.producto)}</span>
+            ${dias != null && dias <= 14 ? `<span class="chip chip-green ml-1">Nuevo · ${dias === 0 ? "hoy" : "hace " + dias + " d"}</span>` : ""}
+            ${(p.stockTotal || 0) <= 0 ? '<span class="chip chip-low ml-1">Sin stock</span>' : ""}</div>
+          <span class="text-xs text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p, "30dias"))} vend. (30 d)</span>
+        </div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-2"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(d.base === b, `data-clb="${p.id}" data-v="${focoEsc(b)}"`, b)).join("")}</div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo (uno)</span>${CL_GRUPOS.map(g => chip(d.grupo === g, `data-clg="${p.id}" data-v="${g}"`, g)).join("")}${top && d.grupo !== "Más vendidos" ? '<span class="text-[11px] text-amber-700 font-semibold">⭐ sugerido: Más vendidos</span>' : ""}</div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(d.tendencias.includes(t), `data-clt="${p.id}" data-v="${focoEsc(t)}"`, t, d.tendencias.includes(t) ? "background:#eef2ff;color:#4338ca;border-color:#4f46e5" : "")).join("")}<button class="pill" data-clnt="${p.id}" style="border-style:dashed">+ Nueva tendencia</button></div>
+        <div class="flex flex-wrap gap-2 mt-3">
+          <button class="pill active" data-clsave="${p.id}">Guardar</button>
+          ${c.rechazado ? `<button class="pill" data-clunrej="${p.id}">Volver a tener en cuenta</button>` : `<button class="pill" data-clrej="${p.id}" style="color:#b91c1c;border-color:#fca5a5">Rechazar · no va al foco</button>`}
+        </div>
+      </div></div>`;
+  }
+  function renderClasif() {
+    const cont = document.getElementById("clasifLista"); if (!cont || !data) return;
+    const pend = clParaAsignar();
+    const badge = document.getElementById("clasifBadge"); if (badge) { badge.textContent = pend.length; badge.style.display = pend.length ? "" : "none"; }
+    const rech = clProds().filter(p => (clDe(p) || {}).rechazado), asig = clAsignados();
+    const tabs = [["asignar", `Para asignar (${pend.length})`], ["clasificados", `Clasificados (${asig.length})`], ["masvend", "Más vendidos"], ["rechazados", `Rechazados (${rech.length})`]];
+    document.getElementById("clasifTabs").innerHTML = tabs.map(([k, l]) => `<button class="pill ${clTab === k ? "active" : ""}" data-clt-tab="${k}">${l}</button>`).join("");
+    const q = clBusca.trim().toLowerCase(), filt = l => q ? l.filter(p => String(p.producto || "").toLowerCase().includes(q)) : l;
+    let html = "";
+    if (clTab === "asignar") html = `<p class="text-xs text-slate-500 mb-3">Productos con stock que todavía no clasificaste, los más nuevos primero. Cuando entra uno nuevo o vuelve a tener stock uno sin clasificar, aparece acá.</p>` + (filt(pend).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">No hay productos para asignar. 🎉</div>');
+    else if (clTab === "clasificados") html = filt(asig).sort((a, b) => String(b.creado || "").localeCompare(String(a.creado || ""))).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">Todavía no clasificaste productos.</div>';
+    else if (clTab === "rechazados") html = filt(rech).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">No hay rechazados.</div>';
+    else {
+      const top = clTopVentas(), topIds = new Set(clProds().filter(p => clVend(p, "30dias") > 0).sort((a, b) => clVend(b, "30dias") - clVend(a, "30dias")).slice(0, 30).map(p => p.id));
+      const sugeridos = top.filter(p => (clDe(p) || {}).grupo !== "Más vendidos");
+      const revisar = clAsignados().filter(p => clDe(p).grupo === "Más vendidos" && !topIds.has(p.id));
+      const fila = (p, btn) => `<div class="flex items-center gap-3 py-2 border-b border-slate-100"><img src="${p.imagen || ""}" class="w-10 h-12 object-cover rounded bg-slate-100" onerror="this.style.visibility='hidden'"/><div class="flex-1 min-w-0"><div class="text-sm font-semibold truncate">${focoEsc(p.producto)}</div><div class="text-xs text-slate-500">${fmtNum(clVend(p, "30dias"))} vend. (30 d) · ${fmtNum(p.stockTotal || 0)} u.${(clDe(p) || {}).grupo ? " · hoy en " + focoEsc(clDe(p).grupo) : (clDe(p) || {}).base ? "" : " · sin clasificar"}</div></div>${btn}</div>`;
+      html = `<div class="card p-4 mb-3"><div class="font-bold text-sm mb-1">Sugeridos para sumar</div><p class="text-xs text-slate-500 mb-2">Los que más vendieron en 30 días y no están en Más vendidos. Si ya tienen otro grupo (New In, Sale, Básicos), lo reemplaza.</p>${sugeridos.map(p => fila(p, (clDe(p) || {}).base ? `<button class="pill" data-clmv="${p.id}">Marcar</button>` : '<span class="text-xs text-slate-400">clasificalo primero</span>')).join("") || '<div class="text-xs text-slate-400">Nada para sugerir.</div>'}</div>
+        <div class="card p-4"><div class="font-bold text-sm mb-1">Para revisar</div><p class="text-xs text-slate-500 mb-2">Están en Más vendidos pero ya no están entre los 30 más vendidos de 30 días.</p>${revisar.map(p => fila(p, `<button class="pill" data-clqmv="${p.id}">Quitar</button>`)).join("") || '<div class="text-xs text-slate-400">Todo en orden.</div>'}</div>`;
+    }
+    cont.innerHTML = html;
+    const set = (pid, fn) => { const d = clDraft[pid]; fn(d); renderClasif(); };
+    cont.querySelectorAll("[data-clb]").forEach(b => b.onclick = () => set(b.dataset.clb, d => d.base = d.base === b.dataset.v ? "" : b.dataset.v));
+    cont.querySelectorAll("[data-clg]").forEach(b => b.onclick = () => set(b.dataset.clg, d => d.grupo = d.grupo === b.dataset.v ? "" : b.dataset.v));
+    cont.querySelectorAll("[data-clt]").forEach(b => b.onclick = () => set(b.dataset.clt, d => { const i = d.tendencias.indexOf(b.dataset.v); i >= 0 ? d.tendencias.splice(i, 1) : d.tendencias.push(b.dataset.v); }));
+    cont.querySelectorAll("[data-clnt]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la tendencia nueva (ej. Lunares):") || "").trim(); if (!n) return;
+      if (!clCfg.tendencias.some(t => t.toLowerCase() === n.toLowerCase())) db.ref("dashboard_clasif/cfg/tendencias").set([...clCfg.tendencias, n]);
+      const d = clDraft[b.dataset.clnt]; const ex = clCfg.tendencias.find(t => t.toLowerCase() === n.toLowerCase()) || n; if (!d.tendencias.includes(ex)) d.tendencias.push(ex); renderClasif(); });
+    cont.querySelectorAll("[data-clsave]").forEach(b => b.onclick = () => { const pid = b.dataset.clsave, d = clDraft[pid];
+      if (!d.base) { alert("Elegí la categoría"); return; }
+      const t = {}; d.tendencias.forEach(x => t[x] = true);
+      db.ref("dashboard_clasif/items/" + pid).update({ base: d.base, grupo: d.grupo || null, tendencias: Object.keys(t).length ? t : null, rechazado: null, ts: Date.now() });
+      delete clDraft[pid]; });
+    cont.querySelectorAll("[data-clrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clrej).update({ rechazado: true, ts: Date.now() }); delete clDraft[b.dataset.clrej]; });
+    cont.querySelectorAll("[data-clunrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clunrej + "/rechazado").remove(); delete clDraft[b.dataset.clunrej]; });
+    cont.querySelectorAll("[data-clmv]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clmv + "/grupo").set("Más vendidos"); delete clDraft[b.dataset.clmv]; });
+    cont.querySelectorAll("[data-clqmv]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clqmv + "/grupo").remove(); delete clDraft[b.dataset.clqmv]; });
+    document.querySelectorAll("[data-clt-tab]").forEach(b => b.onclick = () => { clTab = b.dataset.cltTab; renderClasif(); });
+  }
+  document.getElementById("clasifBusca").addEventListener("input", e => { clBusca = e.target.value; renderClasif(); });
+
+  // Foco con la clasificación propia: por grupo, por tendencia o por categoría base.
+  function renderFocoClasif() {
+    const cont = document.getElementById("focoLista");
+    let secciones;
+    if (focoModo === "grupo") secciones = CL_GRUPOS.map(g => [g, p => clDe(p).grupo === g]);
+    else if (focoModo === "tendencia") secciones = clCfg.tendencias.map(t => [t, p => !!(clDe(p).tendencias || {})[t]]);
+    else secciones = clCfg.bases.map(b => [b, p => clDe(p).base === b]);
+    const asig = clAsignados();
+    const pend = clParaAsignar().length;
+    const aviso = pend ? `<button class="card p-3 w-full text-left text-sm" data-goto="clasificar" style="border-color:#fcd34d;background:#fffbeb">🏷️ <b>${pend} producto${pend > 1 ? "s" : ""} para asignar</b> — tocá para clasificarlos</button>` : "";
+    if (!secciones.length) { cont.innerHTML = aviso + '<div class="card p-4 text-sm text-slate-500">Todavía no hay tendencias creadas. Se crean desde Clasificar.</div>'; return; }
+    cont.innerHTML = aviso + secciones.map(([nom, fn]) => {
+      let ps = asig.filter(fn);
+      const total = ps.length, sinN = ps.filter(p => (p.stockTotal || 0) <= 0).length;
+      const stockTot = ps.reduce((s, p) => s + (p.stockTotal || 0), 0), vendTot = ps.reduce((s, p) => s + clVend(p), 0);
+      const basesHay = focoModo === "categoria" ? [] : clCfg.bases.filter(b => ps.some(p => clDe(p).base === b));
+      const bf = focoBaseFiltro[nom] || "";
+      if (bf) ps = ps.filter(p => clDe(p).base === bf);
+      if (focoOcultarSin) ps = ps.filter(p => (p.stockTotal || 0) > 0);
+      ps.sort((a, b) => ((b.stockTotal || 0) > 0) - ((a.stockTotal || 0) > 0) || clVend(b) - clVend(a) || (b.stockTotal || 0) - (a.stockTotal || 0));
+      const card = p => { const e = clEstado(p);
+        const cls = e === "sin" ? "border-red-300 bg-red-50" : e === "rep" ? "border-amber-300 bg-amber-50" : "border-slate-200";
+        return `<div class="border ${cls} rounded-xl p-2 flex flex-col relative">
+          ${e === "sin" ? '<span class="chip absolute" style="top:12px;left:12px;background:#dc2626;color:#fff">Sin stock</span>' : e === "rep" ? '<span class="chip absolute" style="top:12px;left:12px;background:#f59e0b;color:#fff">Reponer</span>' : ""}
+          <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100 mb-2" onerror="this.style.visibility='hidden'" />
+          <div class="text-xs font-semibold leading-tight mb-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${focoEsc(p.producto)}</div>
+          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(p.stockTotal || 0)}</b> u. · ${fmtNum(clVend(p))} vend.</div></div>`; };
+      return `<div class="card p-4"><div class="flex justify-between items-baseline mb-2 flex-wrap gap-2"><div class="font-bold">${focoEsc(nom.toUpperCase())}</div><div class="text-xs text-slate-500">${total} producto${total !== 1 ? "s" : ""} · ${fmtNum(stockTot)} u. · ${fmtNum(vendTot)} vendidas${sinN ? ` · <b style="color:#b91c1c">${sinN} sin stock</b>` : ""}</div></div>
+        ${basesHay.length > 1 ? `<div class="flex flex-wrap gap-1.5 mb-3"><button class="pill ${!bf ? "active" : ""}" data-fbf="${focoEsc(nom)}" data-v="">Todas</button>${basesHay.map(b => `<button class="pill ${bf === b ? "active" : ""}" data-fbf="${focoEsc(nom)}" data-v="${focoEsc(b)}">${focoEsc(b)}</button>`).join("")}</div>` : ""}
+        <div class="grid grid-cols-3 md:grid-cols-6 gap-2">${ps.map(card).join("") || '<div class="text-xs text-slate-400 col-span-3">Sin productos.</div>'}</div></div>`;
+    }).join("");
+    cont.querySelectorAll("[data-fbf]").forEach(b => b.onclick = () => { focoBaseFiltro[b.dataset.fbf] = b.dataset.v; renderFoco(); });
+  }
+
   // ---------------- Foco: 6 categorías × (6 con más stock, 6 más vendidos) ----------------
   // Las categorías elegidas se guardan en Firebase (dashboard_foco) para verlas igual en cualquier dispositivo.
   let focoCats = [], focoPeriodo = "30dias", focoAgregando = false;
   const FOCO_PERIODOS = [["7dias","7 días"],["15dias","15 días"],["30dias","30 días"],["45dias","45 días"],["60dias","60 días"]];
   db.ref("dashboard_foco").on("value", snap => { const v = snap.val() || {}; focoCats = (v.categorias || []).filter(Boolean); if (v.periodo) focoPeriodo = v.periodo; if (data) renderFoco(); });
-  function focoGuardar() { db.ref("dashboard_foco").set({ categorias: focoCats, periodo: focoPeriodo }); }
+  function focoGuardar() { db.ref("dashboard_foco").update({ categorias: focoCats, periodo: focoPeriodo }); }
   const focoEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const FOCO_MODOS = [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["tn", "Tienda Nube (anterior)"]];
   function renderFoco() {
-    if (!document.getElementById("focoLista")) return;
+    if (!document.getElementById("focoLista") || !data) return;
+    document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
+    document.getElementById("focoModoBar").innerHTML = `<span class="text-xs text-slate-500 font-medium">Ver por:</span>${FOCO_MODOS.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
+      + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "");
+    document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
+    const oc = document.getElementById("focoOcSin"); if (oc) oc.onchange = () => { focoOcultarSin = oc.checked; db.ref("dashboard_foco/ocultarSinStock").set(focoOcultarSin); renderFoco(); };
+    document.getElementById("focoCats").style.display = focoModo === "tn" ? "" : "none";
+    document.getElementById("focoLeyenda").textContent = focoModo === "tn"
+      ? "En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer)."
+      : "Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Los productos sin clasificar o rechazados no aparecen acá.";
+    if (focoModo !== "tn") {
+      document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
+      renderFocoClasif(); return;
+    }
+    renderFocoTN();
+  }
+  function renderFocoTN() {
     const sinDato = !(data.productos || []).some(p => p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo]);
     document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
     const todas = categoriasUnicas();
@@ -1679,7 +1831,7 @@
   }
 
   function renderAll() {
-    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
+    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } try{ renderClasif(); }catch(e){ console.error(e); } renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
   }
 
   // ---------------- Resumen (Web y Local separados, misma estructura en las dos) ----------------
