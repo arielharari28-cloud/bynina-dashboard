@@ -127,6 +127,9 @@ function buildPeriods() {
     "7dias": { desde: startOfDay(daysAgo(7)), hasta: endOfDay(now), dias: 7 },
     "15dias": { desde: startOfDay(daysAgo(15)), hasta: endOfDay(now), dias: 15 },
     "30dias": { desde: startOfDay(daysAgo(30)), hasta: endOfDay(now), dias: 30 },
+    // 45 y 60 días: para la sección Foco (los pedidos se traen de los últimos 95 días, alcanza)
+    "45dias": { desde: startOfDay(daysAgo(45)), hasta: endOfDay(now), dias: 45 },
+    "60dias": { desde: startOfDay(daysAgo(60)), hasta: endOfDay(now), dias: 60 },
     estemes: { desde: firstOfThisMonth, hasta: endOfDay(now), dias: d },
     mesanterior: { desde: firstOfLastMonth, hasta: lastOfLastMonth, dias: 30 },
   };
