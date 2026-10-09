@@ -1062,7 +1062,7 @@
             ${(p.stockTotal || 0) <= 0 ? '<span class="chip chip-low ml-1">Sin stock</span>' : ""}</div>
           <span class="text-xs text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p, "30dias"))} vend. (30 d)</span>
         </div>
-        <div class="flex flex-wrap gap-1.5 items-center mt-2"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(d.base === b, `data-clb="${p.id}" data-v="${focoEsc(b)}"`, b)).join("")}</div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-2"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(d.base === b, `data-clb="${p.id}" data-v="${focoEsc(b)}"`, b)).join("")}<button class="pill" data-clnb="${p.id}" style="border-style:dashed">+ Nueva categoría</button></div>
         <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo (uno)</span>${CL_GRUPOS.map(g => chip(d.grupo === g, `data-clg="${p.id}" data-v="${g}"`, g)).join("")}${top && d.grupo !== "Más vendidos" ? '<span class="text-[11px] text-amber-700 font-semibold">⭐ sugerido: Más vendidos</span>' : ""}</div>
         <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(d.tendencias.includes(t), `data-clt="${p.id}" data-v="${focoEsc(t)}"`, t, d.tendencias.includes(t) ? "background:#eef2ff;color:#4338ca;border-color:#4f46e5" : "")).join("")}<button class="pill" data-clnt="${p.id}" style="border-style:dashed">+ Nueva tendencia</button></div>
         <div class="flex flex-wrap gap-2 mt-3">
@@ -1099,6 +1099,10 @@
     cont.querySelectorAll("[data-clnt]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la tendencia nueva (ej. Lunares):") || "").trim(); if (!n) return;
       if (!clCfg.tendencias.some(t => t.toLowerCase() === n.toLowerCase())) db.ref("dashboard_clasif/cfg/tendencias").set([...clCfg.tendencias, n]);
       const d = clDraft[b.dataset.clnt]; const ex = clCfg.tendencias.find(t => t.toLowerCase() === n.toLowerCase()) || n; if (!d.tendencias.includes(ex)) d.tendencias.push(ex); renderClasif(); });
+    cont.querySelectorAll("[data-clnb]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la categoría nueva (ej. Musculosa):") || "").trim(); if (!n) return;
+      const ex = clCfg.bases.find(x => x.toLowerCase() === n.toLowerCase());
+      if (!ex) db.ref("dashboard_clasif/cfg/bases").set([...clCfg.bases, n]);
+      clDraft[b.dataset.clnb].base = ex || n; renderClasif(); });
     cont.querySelectorAll("[data-clsave]").forEach(b => b.onclick = () => { const pid = b.dataset.clsave, d = clDraft[pid];
       if (!d.base) { alert("Elegí la categoría"); return; }
       const t = {}; d.tendencias.forEach(x => t[x] = true);
