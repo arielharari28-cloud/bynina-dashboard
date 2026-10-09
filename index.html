@@ -112,7 +112,7 @@
     <!-- ===================== STOCK GENERAL ===================== -->
     <div class="view" data-view="foco">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🔎 Foco</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4">Hasta 6 categorías: los 6 artículos con más stock y los 6 más vendidos de cada una.</p>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Las categorías que elijas, en el orden que quieras (◀ ▶): los 6 artículos con más stock y los 6 más vendidos de cada una.</p>
       <div class="flex flex-wrap gap-2 items-center mb-3"><span class="text-xs text-slate-500 font-medium">Vendidos en los últimos:</span><div class="flex flex-wrap gap-1.5" id="focoPeriodo"></div></div>
       <div class="flex flex-wrap gap-1.5 items-center mb-5" id="focoCats"></div>
       <div id="focoLista" class="space-y-4"></div>
@@ -1023,10 +1023,10 @@
     const sinDato = !(data.productos || []).some(p => p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo]);
     document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
     const todas = categoriasUnicas();
-    document.getElementById("focoCats").innerHTML = focoCats.map((c, i) => `<span class="pill active">${focoEsc(c)} <span data-fq="${i}" style="cursor:pointer;margin-left:4px">✕</span></span>`).join("")
-      + (focoCats.length < 6 ? (focoAgregando
+    document.getElementById("focoCats").innerHTML = focoCats.map((c, i) => `<span class="pill active" style="display:inline-flex;align-items:center;gap:4px">${i > 0 ? `<span data-fl="${i}" title="Mover antes" style="cursor:pointer;opacity:.8">◀</span>` : ""}${focoEsc(c)}${i < focoCats.length - 1 ? `<span data-fr="${i}" title="Mover después" style="cursor:pointer;opacity:.8">▶</span>` : ""}<span data-fq="${i}" title="Quitar" style="cursor:pointer;margin-left:4px">✕</span></span>`).join("")
+      + (focoAgregando
         ? `<select id="focoAdd" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Elegí una categoría…</option>${todas.filter(c => !focoCats.includes(c)).map(c => `<option value="${focoEsc(c)}">${focoEsc(c)}</option>`).join("")}</select>`
-        : `<button class="pill" id="focoMas">+ Agregar categoría (${focoCats.length} de 6)</button>`) : "");
+        : `<button class="pill" id="focoMas">+ Agregar categoría</button>`);
     const vend = p => (p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo] && p.ventasPorPeriodo[focoPeriodo].unidades) || 0;
     const prods = (data.productos || []).filter(p => p.publicado);
     const fila = (p, modo) => {
@@ -1048,11 +1048,14 @@
         return `<div class="card p-4"><div class="flex justify-between items-baseline mb-3"><div class="font-bold">${focoEsc(cat)}</div><div class="text-xs text-slate-500">${fmtNum(stockTot)} u. en stock · ${fmtNum(vendTot)} vendidas</div></div>
           <div class="text-xs font-semibold text-slate-500 mb-2">Más stock</div><div class="grid grid-cols-3 md:grid-cols-6 gap-2 mb-4">${masStock.map(p => fila(p, "stock")).join("") || '<div class="text-xs text-slate-400">Sin productos.</div>'}</div>
           <div class="text-xs font-semibold text-slate-500 mb-2">Más vendidos</div><div class="grid grid-cols-3 md:grid-cols-6 gap-2">${masVend.map(p => fila(p, "vend")).join("") || '<div class="text-xs text-slate-400">Sin ventas en el período.</div>'}</div></div>`;
-      }).join("") : '<div class="card p-4 text-sm text-slate-500">Elegí hasta 6 categorías arriba.</div>');
+      }).join("") : '<div class="card p-4 text-sm text-slate-500">Elegí las categorías arriba.</div>');
     document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
     document.querySelectorAll("[data-fq]").forEach(b => b.onclick = () => { focoCats.splice(Number(b.dataset.fq), 1); focoGuardar(); renderFoco(); });
+    const mover = (i, d) => { const j = i + d; if (j < 0 || j >= focoCats.length) return; [focoCats[i], focoCats[j]] = [focoCats[j], focoCats[i]]; focoGuardar(); renderFoco(); };
+    document.querySelectorAll("[data-fl]").forEach(b => b.onclick = () => mover(Number(b.dataset.fl), -1));
+    document.querySelectorAll("[data-fr]").forEach(b => b.onclick = () => mover(Number(b.dataset.fr), 1));
     const mas = document.getElementById("focoMas"); if (mas) mas.onclick = () => { focoAgregando = true; renderFoco(); };
-    const add = document.getElementById("focoAdd"); if (add) { add.focus(); add.onchange = () => { if (add.value && focoCats.length < 6) { focoCats.push(add.value); focoGuardar(); } focoAgregando = false; renderFoco(); }; }
+    const add = document.getElementById("focoAdd"); if (add) { add.focus(); add.onchange = () => { if (add.value) { focoCats.push(add.value); focoGuardar(); } focoAgregando = false; renderFoco(); }; }
   }
 
   // ---------------- Dashboard ----------------
