@@ -18,6 +18,12 @@
   .navitem{display:flex;align-items:center;gap:.6rem;padding:.6rem .7rem;border-radius:.6rem;font-size:.9rem;font-weight:600;color:#475569;cursor:pointer;}
   .navitem:hover{background:#f8fafc;}
   .navitem.active{background:#eef2ff;color:#4338ca;}
+  /* Menú del celu: fila deslizable arriba (en la compu se usa el menú lateral) */
+  #mobileNav{position:sticky;top:env(safe-area-inset-top,0px);z-index:30;display:flex;gap:.4rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;margin:-1rem -1rem 1rem;padding:.6rem 1rem;background:rgba(248,250,252,.96);border-bottom:1px solid #e2e8f0;}
+  #mobileNav::-webkit-scrollbar{display:none;}
+  #mobileNav .navitem{flex:none;white-space:nowrap;padding:.45rem .8rem;font-size:.82rem;border:1px solid #e2e8f0;background:#fff;border-radius:999px;}
+  #mobileNav .navitem.active{background:#4f46e5;color:#fff;border-color:#4f46e5;}
+  @media (min-width:768px){#mobileNav{display:none;}}
   .card{background:#fff;border:1px solid #e2e8f0;border-radius:.9rem;}
   .chip{font-size:.7rem;font-weight:600;padding:.2rem .55rem;border-radius:9999px;}
   .chip-low{background:#fee2e2;color:#b91c1c;}
@@ -51,6 +57,18 @@
 </aside>
 
 <main class="flex-1 min-w-0 p-4 md:p-6 max-w-[1100px] mx-auto">
+  <nav id="mobileNav" aria-label="Secciones">
+    <div class="navitem active" data-view="dashboard">📊 Dashboard</div>
+    <div class="navitem" data-view="foco">🔎 Foco</div>
+    <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadgeM" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:4px"></span></div>
+    <div class="navitem" data-view="stock">📦 Stock general</div>
+    <div class="navitem" data-view="ultimas">⚠️ Últimas unidades</div>
+    <div class="navitem" data-view="vendidos">🏆 Productos vendidos</div>
+    <div class="navitem" data-view="nuevos">✨ Productos nuevos</div>
+    <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
+    <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
+    <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
+  </nav>
 
   <div id="loading" class="flex items-center justify-center h-48 text-slate-400 gap-3">
     <div class="w-5 h-5 border-2 border-slate-200 border-t-indigo-500 rounded-full spin"></div>Cargando dashboard...
@@ -1017,6 +1035,8 @@
   function irAVista(view) {
     document.querySelectorAll(".navitem").forEach(n => n.classList.toggle("active", n.dataset.view === view));
     document.querySelectorAll(".view").forEach(v => v.classList.toggle("active", v.dataset.view === view));
+    const mItem = document.querySelector('#mobileNav .navitem[data-view="' + view + '"]');
+    if (mItem && mItem.scrollIntoView) mItem.scrollIntoView({ block: "nearest", inline: "center" });
     window.scrollTo(0, 0);
   }
 
@@ -1074,7 +1094,7 @@
   function renderClasif() {
     const cont = document.getElementById("clasifLista"); if (!cont || !data) return;
     const pend = clParaAsignar();
-    const badge = document.getElementById("clasifBadge"); if (badge) { badge.textContent = pend.length; badge.style.display = pend.length ? "" : "none"; }
+    ["clasifBadge", "clasifBadgeM"].forEach(bid => { const badge = document.getElementById(bid); if (badge) { badge.textContent = pend.length; badge.style.display = pend.length ? "" : "none"; } });
     const rech = clProds().filter(p => (clDe(p) || {}).rechazado), asig = clAsignados();
     const tabs = [["asignar", `Para asignar (${pend.length})`], ["clasificados", `Clasificados (${asig.length})`], ["masvend", "Más vendidos"], ["rechazados", `Rechazados (${rech.length})`]];
     document.getElementById("clasifTabs").innerHTML = tabs.map(([k, l]) => `<button class="pill ${clTab === k ? "active" : ""}" data-clt-tab="${k}">${l}</button>`).join("");
