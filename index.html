@@ -141,7 +141,7 @@
 
     <div class="view" data-view="clasificar">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏷️ Clasificar mercadería</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4">A cada producto: su categoría, un grupo (New In, Sale, Básicos o Más vendidos — uno solo) y las tendencias que quieras. Es lo que usa el Foco. Rechazar lo saca del foco.</p>
+      <p class="text-sm text-slate-500 mt-1 mb-4">A cada producto: su categoría, un grupo (New In, Colección, Básicos, Más vendidos o Sale — uno solo; New In pasa solo a Colección a los 30 días) y las tendencias que quieras. Es lo que usa el Foco. Rechazar lo saca del foco.</p>
       <div class="flex flex-wrap gap-2 items-center mb-4"><div id="clasifTabs" class="flex flex-wrap gap-1.5"></div><input id="clasifBusca" type="text" placeholder="Buscar producto…" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[180px]" /></div>
       <div id="clasifLista" class="space-y-3"></div>
     </div>
@@ -1044,20 +1044,48 @@
   // ---------------- Clasificación manual de la mercadería (oct 2026) ----------------
   // Cada producto de Tienda Nube se clasifica a mano (no depende de las categorías de TN):
   //  - base: categoría de prenda (una sola, obligatoria)
-  //  - grupo: New In / Sale / Básicos / Más vendidos (como mucho uno: no pueden coincidir)
+  //  - grupo: New In / Colección / Básicos / Más vendidos / Sale (como mucho uno)
+  //    New In vence a los CL_NEWIN_DIAS días desde que se creó en Tienda Nube y pasa solo a Colección
+  //    (se calcula al mostrar, no se reescribe en Firebase).
   //  - tendencias: las que se vayan creando (varias, combinan con cualquier grupo)
   //  - rechazado: no va al foco
   // Firebase: dashboard_clasif/items/{productId} y dashboard_clasif/cfg {bases, tendencias}.
-  const CL_GRUPOS = ["New In", "Sale", "Básicos", "Más vendidos"];
+  const CL_GRUPOS = ["New In", "Colección", "Básicos", "Más vendidos", "Sale"];
+  const CL_NEWIN_DIAS = 30;
+  const clNorm = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+  const clEsGrupo = t => CL_GRUPOS.some(g => clNorm(g) === clNorm(t));
   const CL_BASES_DEF = ["Remera", "Top", "Body", "Buzo", "Campera", "Pantalón", "Short", "Jean", "Pollera", "Vestido", "Conjunto"];
   let clItems = {}, clCfg = { bases: CL_BASES_DEF, tendencias: [] }, clTab = "asignar", clDraft = {}, clBusca = "";
   let focoModo = "grupo", focoOcultarSin = false; const focoBaseFiltro = {};
   db.ref("dashboard_clasif/items").on("value", s => { clItems = s.val() || {}; if (data) { renderClasif(); renderFoco(); } });
-  db.ref("dashboard_clasif/cfg").on("value", s => { const v = s.val() || {}; clCfg = { bases: (v.bases && v.bases.length) ? v.bases : CL_BASES_DEF, tendencias: v.tendencias || [] }; if (data) { renderClasif(); renderFoco(); } });
+  db.ref("dashboard_clasif/cfg").on("value", s => { const v = s.val() || {}; const tend = v.tendencias || [];
+    const dup = tend.filter(clEsGrupo);
+    if (dup.length) clLimpiarTendGrupo(dup, tend.filter(t => !clEsGrupo(t)));
+    clCfg = { bases: (v.bases && v.bases.length) ? v.bases : CL_BASES_DEF, tendencias: tend.filter(t => !clEsGrupo(t)) }; if (data) { renderClasif(); renderFoco(); } });
+  // Una tendencia con el mismo nombre que un grupo (ej. "Basicos" vs "Básicos") se pasa al grupo:
+  // los productos que la tenían y no tenían grupo quedan en ese grupo; después se borra la tendencia.
+  let clLimpiando = false;
+  function clLimpiarTendGrupo(dup, resto) {
+    if (clLimpiando) return; clLimpiando = true;
+    db.ref("dashboard_clasif/items").once("value").then(s => {
+      const items = s.val() || {}, upd = {};
+      Object.entries(items).forEach(([pid, c]) => { const t = (c && c.tendencias) || {};
+        dup.forEach(d => { if (!t[d]) return;
+          const g = CL_GRUPOS.find(x => clNorm(x) === clNorm(d));
+          if (!c.grupo) upd[pid + "/grupo"] = g;
+          upd[pid + "/tendencias/" + d] = null; }); });
+      return (Object.keys(upd).length ? db.ref("dashboard_clasif/items").update(upd) : Promise.resolve())
+        .then(() => db.ref("dashboard_clasif/cfg/tendencias").set(resto));
+    }).finally(() => { clLimpiando = false; });
+  }
   db.ref("dashboard_foco/modo").on("value", s => { if (s.val()) focoModo = s.val(); if (data) renderFoco(); });
   db.ref("dashboard_foco/ocultarSinStock").on("value", s => { focoOcultarSin = !!s.val(); if (data) renderFoco(); });
   const clVend = (p, per) => (p.ventasPorPeriodo && p.ventasPorPeriodo[per || focoPeriodo] && p.ventasPorPeriodo[per || focoPeriodo].unidades) || 0;
   const clDe = p => clItems[p.id] || null;
+  // Grupo que vale hoy: New In con más de CL_NEWIN_DIAS días cuenta como Colección.
+  function clGrupo(p, g) { if (g === undefined) g = (clDe(p) || {}).grupo || "";
+    if (g === "New In") { const d = clDias(p.creado); if (d != null && d > CL_NEWIN_DIAS) return "Colección"; }
+    return g; }
   const clProds = () => (data && data.productos || []).filter(p => p.publicado && p.id != null);
   const clAsignados = () => clProds().filter(p => { const c = clDe(p); return c && c.base && !c.rechazado; });
   function clParaAsignar() {
@@ -1070,7 +1098,7 @@
   function clEstado(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return "sin"; if (v >= 5 && st <= Math.max(10, v)) return "rep"; return ""; }
 
   function clCard(p) {
-    const c = clDe(p) || {}, d = clDraft[p.id] || (clDraft[p.id] = { base: c.base || "", grupo: c.grupo || "", tendencias: Object.keys(c.tendencias || {}) });
+    const c = clDe(p) || {}, d = clDraft[p.id] || (clDraft[p.id] = { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: Object.keys(c.tendencias || {}).filter(t => !clEsGrupo(t)) });
     const dias = clDias(p.creado), top = clTopVentas().some(x => x.id === p.id);
     const chip = (on, attrs, txt, extra = "") => `<button class="pill ${on ? "active" : ""}" ${attrs} style="${extra}">${focoEsc(txt)}</button>`;
     return `<div class="card p-3" style="display:grid;grid-template-columns:88px 1fr;gap:12px">
@@ -1083,7 +1111,7 @@
           <span class="text-xs text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p, "30dias"))} vend. (30 d)</span>
         </div>
         <div class="flex flex-wrap gap-1.5 items-center mt-2"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(d.base === b, `data-clb="${p.id}" data-v="${focoEsc(b)}"`, b)).join("")}<button class="pill" data-clnb="${p.id}" style="border-style:dashed">+ Nueva categoría</button></div>
-        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo (uno)</span>${CL_GRUPOS.map(g => chip(d.grupo === g, `data-clg="${p.id}" data-v="${g}"`, g)).join("")}${top && d.grupo !== "Más vendidos" ? '<span class="text-[11px] text-amber-700 font-semibold">⭐ sugerido: Más vendidos</span>' : ""}</div>
+        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo (uno)</span>${CL_GRUPOS.map(g => chip(d.grupo === g, `data-clg="${p.id}" data-v="${g}"`, g === "New In" && d.grupo === g && dias != null ? `New In · ${Math.max(0, CL_NEWIN_DIAS - dias)} d → Colección` : g, g === "Colección" && d.grupo !== g ? "border-color:#5DCAA5" : "")).join("")}${top && d.grupo !== "Más vendidos" ? '<span class="text-[11px] text-amber-700 font-semibold">⭐ sugerido: Más vendidos</span>' : ""}</div>
         <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(d.tendencias.includes(t), `data-clt="${p.id}" data-v="${focoEsc(t)}"`, t, d.tendencias.includes(t) ? "background:#eef2ff;color:#4338ca;border-color:#4f46e5" : "")).join("")}<button class="pill" data-clnt="${p.id}" style="border-style:dashed">+ Nueva tendencia</button></div>
         <div class="flex flex-wrap gap-2 mt-3">
           <button class="pill active" data-clsave="${p.id}">Guardar</button>
@@ -1105,10 +1133,10 @@
     else if (clTab === "rechazados") html = filt(rech).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">No hay rechazados.</div>';
     else {
       const top = clTopVentas(), topIds = new Set(clProds().filter(p => clVend(p, "30dias") > 0).sort((a, b) => clVend(b, "30dias") - clVend(a, "30dias")).slice(0, 30).map(p => p.id));
-      const sugeridos = top.filter(p => (clDe(p) || {}).grupo !== "Más vendidos");
-      const revisar = clAsignados().filter(p => clDe(p).grupo === "Más vendidos" && !topIds.has(p.id));
-      const fila = (p, btn) => `<div class="flex items-center gap-3 py-2 border-b border-slate-100"><img src="${p.imagen || ""}" class="w-10 h-12 object-cover rounded bg-slate-100" onerror="this.style.visibility='hidden'"/><div class="flex-1 min-w-0"><div class="text-sm font-semibold truncate">${focoEsc(p.producto)}</div><div class="text-xs text-slate-500">${fmtNum(clVend(p, "30dias"))} vend. (30 d) · ${fmtNum(p.stockTotal || 0)} u.${(clDe(p) || {}).grupo ? " · hoy en " + focoEsc(clDe(p).grupo) : (clDe(p) || {}).base ? "" : " · sin clasificar"}</div></div>${btn}</div>`;
-      html = `<div class="card p-4 mb-3"><div class="font-bold text-sm mb-1">Sugeridos para sumar</div><p class="text-xs text-slate-500 mb-2">Los que más vendieron en 30 días y no están en Más vendidos. Si ya tienen otro grupo (New In, Sale, Básicos), lo reemplaza.</p>${sugeridos.map(p => fila(p, (clDe(p) || {}).base ? `<button class="pill" data-clmv="${p.id}">Marcar</button>` : '<span class="text-xs text-slate-400">clasificalo primero</span>')).join("") || '<div class="text-xs text-slate-400">Nada para sugerir.</div>'}</div>
+      const sugeridos = top.filter(p => clGrupo(p) !== "Más vendidos");
+      const revisar = clAsignados().filter(p => clGrupo(p) === "Más vendidos" && !topIds.has(p.id));
+      const fila = (p, btn) => `<div class="flex items-center gap-3 py-2 border-b border-slate-100"><img src="${p.imagen || ""}" class="w-10 h-12 object-cover rounded bg-slate-100" onerror="this.style.visibility='hidden'"/><div class="flex-1 min-w-0"><div class="text-sm font-semibold truncate">${focoEsc(p.producto)}</div><div class="text-xs text-slate-500">${fmtNum(clVend(p, "30dias"))} vend. (30 d) · ${fmtNum(p.stockTotal || 0)} u.${clGrupo(p) ? " · hoy en " + focoEsc(clGrupo(p)) : (clDe(p) || {}).base ? "" : " · sin clasificar"}</div></div>${btn}</div>`;
+      html = `<div class="card p-4 mb-3"><div class="font-bold text-sm mb-1">Sugeridos para sumar</div><p class="text-xs text-slate-500 mb-2">Los que más vendieron en 30 días y no están en Más vendidos. Si ya tienen otro grupo (New In, Colección, Básicos, Sale), lo reemplaza.</p>${sugeridos.map(p => fila(p, (clDe(p) || {}).base ? `<button class="pill" data-clmv="${p.id}">Marcar</button>` : '<span class="text-xs text-slate-400">clasificalo primero</span>')).join("") || '<div class="text-xs text-slate-400">Nada para sugerir.</div>'}</div>
         <div class="card p-4"><div class="font-bold text-sm mb-1">Para revisar</div><p class="text-xs text-slate-500 mb-2">Están en Más vendidos pero ya no están entre los 30 más vendidos de 30 días.</p>${revisar.map(p => fila(p, `<button class="pill" data-clqmv="${p.id}">Quitar</button>`)).join("") || '<div class="text-xs text-slate-400">Todo en orden.</div>'}</div>`;
     }
     cont.innerHTML = html;
@@ -1117,6 +1145,7 @@
     cont.querySelectorAll("[data-clg]").forEach(b => b.onclick = () => set(b.dataset.clg, d => d.grupo = d.grupo === b.dataset.v ? "" : b.dataset.v));
     cont.querySelectorAll("[data-clt]").forEach(b => b.onclick = () => set(b.dataset.clt, d => { const i = d.tendencias.indexOf(b.dataset.v); i >= 0 ? d.tendencias.splice(i, 1) : d.tendencias.push(b.dataset.v); }));
     cont.querySelectorAll("[data-clnt]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la tendencia nueva (ej. Lunares):") || "").trim(); if (!n) return;
+      if (clEsGrupo(n)) { alert(`"${n}" ya es un grupo. Elegilo en Grupo.`); return; }
       if (!clCfg.tendencias.some(t => t.toLowerCase() === n.toLowerCase())) db.ref("dashboard_clasif/cfg/tendencias").set([...clCfg.tendencias, n]);
       const d = clDraft[b.dataset.clnt]; const ex = clCfg.tendencias.find(t => t.toLowerCase() === n.toLowerCase()) || n; if (!d.tendencias.includes(ex)) d.tendencias.push(ex); renderClasif(); });
     cont.querySelectorAll("[data-clnb]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la categoría nueva (ej. Musculosa):") || "").trim(); if (!n) return;
@@ -1140,7 +1169,7 @@
   function renderFocoClasif() {
     const cont = document.getElementById("focoLista");
     let secciones;
-    if (focoModo === "grupo") secciones = CL_GRUPOS.map(g => [g, p => clDe(p).grupo === g]);
+    if (focoModo === "grupo") secciones = CL_GRUPOS.map(g => [g, p => clGrupo(p) === g]);
     else if (focoModo === "tendencia") secciones = clCfg.tendencias.map(t => [t, p => !!(clDe(p).tendencias || {})[t]]);
     else secciones = clCfg.bases.map(b => [b, p => clDe(p).base === b]);
     const asig = clAsignados();
