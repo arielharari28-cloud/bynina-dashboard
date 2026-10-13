@@ -1108,17 +1108,28 @@
   const clDias = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
   function clEstado(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return "sin"; if (v >= 5 && st <= Math.max(10, v)) return "rep"; return ""; }
 
+  // Estado guardado de un producto, en el mismo formato que el borrador (para saber si hay cambios sin guardar).
+  const clGuardado = p => { const c = clDe(p) || {}; return { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: clTendDe(p).filter(t => !clEsGrupo(t)) }; };
+  const clMismo = (a, b) => a.base === b.base && a.grupo === b.grupo && [...a.tendencias].sort().join("|") === [...b.tendencias].sort().join("|");
+  const clGuardando = {};
+  // Hay que mostrar Guardar si: nunca se guardó, está rechazado, venía de "Más vendidos" o el borrador cambió.
+  function clPendiente(p) { const c = clDe(p) || {}; return !c.base || c.rechazado || clEraMasVend(p) || !clMismo(clDraft[p.id] || clGuardado(p), clGuardado(p)); }
   function clCard(p) {
-    const c = clDe(p) || {}, d = clDraft[p.id] || (clDraft[p.id] = { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: clTendDe(p).filter(t => !clEsGrupo(t)) });
+    const c = clDe(p) || {}, d = clDraft[p.id] || (clDraft[p.id] = clGuardado(p));
+    const pendiente = clPendiente(p), yaGuardado = !!c.base && !c.rechazado && !clEraMasVend(p), guardando = !!clGuardando[p.id];
+    const estado = guardando ? '<span class="chip" style="background:#eef2ff;color:#4338ca">Guardando…</span>'
+      : !pendiente ? '<span class="chip" style="background:#EAF3DE;color:#27500A">✓ Guardado</span>'
+      : yaGuardado ? '<span class="chip" style="background:#FAEEDA;color:#633806">Cambios sin guardar</span>' : "";
     const dias = clDias(p.creado), rank = clTopVentas().findIndex(x => x.id === p.id) + 1, ds = clDiasStock(p);
     const chip = (on, attrs, txt, extra = "") => `<button class="pill ${on ? "active" : ""}" ${attrs} style="${extra}">${focoEsc(txt)}</button>`;
-    return `<div class="card p-3" style="display:grid;grid-template-columns:88px 1fr;gap:12px">
+    return `<div class="card p-3" style="display:grid;grid-template-columns:88px 1fr;gap:12px;${yaGuardado && pendiente && !guardando ? "border-color:#f59e0b" : ""}">
       <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100" onerror="this.style.visibility='hidden'" />
       <div class="min-w-0">
         <div class="flex justify-between gap-2 flex-wrap items-start">
           <div class="min-w-0"><span class="font-bold text-sm">${focoEsc(p.producto)}</span>
             ${dias != null && dias <= 14 ? `<span class="chip chip-green ml-1">Nuevo · ${dias === 0 ? "hoy" : "hace " + dias + " d"}</span>` : ""}
-            ${(p.stockTotal || 0) <= 0 ? '<span class="chip chip-low ml-1">Sin stock</span>' : ""}</div>
+            ${(p.stockTotal || 0) <= 0 ? '<span class="chip chip-low ml-1">Sin stock</span>' : ""}
+            ${estado ? `<span class="ml-1">${estado}</span>` : ""}</div>
           <span class="text-xs text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p, "30dias"))} vend. (30 d)</span>
         </div>
         ${rank || (ds != null && ds <= 7 && clVend(p, "30dias") >= 5) || clEraMasVend(p) ? `<div class="flex flex-wrap gap-1.5 mt-1.5">
@@ -1130,7 +1141,8 @@
         <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo (uno)</span>${CL_GRUPOS.map(g => chip(d.grupo === g, `data-clg="${p.id}" data-v="${g}"`, g === "New In" && d.grupo === g && dias != null ? `New In · ${Math.max(0, CL_NEWIN_DIAS - dias)} d → Colección` : g, g === "Colección" && d.grupo !== g ? "border-color:#5DCAA5" : "")).join("")}</div>
         <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(d.tendencias.includes(t), `data-clt="${p.id}" data-v="${focoEsc(t)}"`, t, d.tendencias.includes(t) ? "background:#eef2ff;color:#4338ca;border-color:#4f46e5" : "")).join("")}<button class="pill" data-clnt="${p.id}" style="border-style:dashed">+ Nueva tendencia</button></div>
         <div class="flex flex-wrap gap-2 mt-3">
-          <button class="pill active" data-clsave="${p.id}">Guardar</button>
+          ${guardando ? '<button class="pill active" disabled style="opacity:.7">Guardando…</button>'
+            : pendiente ? `<button class="pill active" data-clsave="${p.id}">${yaGuardado ? "Guardar cambios" : "Guardar"}</button>${yaGuardado ? `<button class="pill" data-clundo="${p.id}">Deshacer</button>` : ""}` : ""}
           ${c.rechazado ? `<button class="pill" data-clunrej="${p.id}">Volver a tener en cuenta</button>` : `<button class="pill" data-clrej="${p.id}" style="color:#b91c1c;border-color:#fca5a5">Rechazar · no va al foco</button>`}
         </div>
       </div></div>`;
@@ -1164,11 +1176,13 @@
     cont.querySelectorAll("[data-clsave]").forEach(b => b.onclick = () => { const pid = b.dataset.clsave, d = clDraft[pid];
       if (!d.base) { alert("Elegí la categoría"); return; }
       const t = {}; d.tendencias.forEach(x => t[clKey(x)] = true);
+      const fallo = e => { delete clGuardando[pid]; renderClasif(); alert("No se pudo guardar: " + (e && e.message || e)); };
+      clGuardando[pid] = true; renderClasif();
       try {
         db.ref("dashboard_clasif/items/" + pid).update({ base: d.base, grupo: d.grupo || null, tendencias: Object.keys(t).length ? t : null, rechazado: null, ts: Date.now() })
-          .catch(e => alert("No se pudo guardar: " + (e && e.message || e)));
-        delete clDraft[pid];
-      } catch (e) { alert("No se pudo guardar: " + (e && e.message || e)); } });
+          .then(() => { delete clGuardando[pid]; delete clDraft[pid]; renderClasif(); }, fallo);
+      } catch (e) { fallo(e); } });
+    cont.querySelectorAll("[data-clundo]").forEach(b => b.onclick = () => { delete clDraft[b.dataset.clundo]; renderClasif(); });
     cont.querySelectorAll("[data-clrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clrej).update({ rechazado: true, ts: Date.now() }); delete clDraft[b.dataset.clrej]; });
     cont.querySelectorAll("[data-clunrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clunrej + "/rechazado").remove(); delete clDraft[b.dataset.clunrej]; });
     document.querySelectorAll("[data-clt-tab]").forEach(b => b.onclick = () => { clTab = b.dataset.cltTab; renderClasif(); });
