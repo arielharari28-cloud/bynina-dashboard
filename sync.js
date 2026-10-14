@@ -126,10 +126,16 @@ function buildPeriods() {
     "7dias": { desde: startOfDay(daysAgo(7)), hasta: endOfDay(now) },
     "15dias": { desde: startOfDay(daysAgo(15)), hasta: endOfDay(now) },
     "30dias": { desde: startOfDay(daysAgo(30)), hasta: endOfDay(now) },
-    estemes: { desde: startOfDay(firstOfThisMonth), hasta: endOfDay(now) },
-    mesanterior: { desde: startOfDay(firstOfLastMonth), hasta: endOfDay(lastOfLastMonth) },
+    // Este mes se compara contra los mismos primeros días del mes anterior (1–14/10 vs 1–14/9).
+    estemes: { desde: startOfDay(firstOfThisMonth), hasta: endOfDay(now),
+      prev: { desde: startOfDay(firstOfLastMonth), hasta: endOfDay(new Date(now.getFullYear(), now.getMonth() - 1, Math.min(now.getDate(), lastOfLastMonth.getDate()))) } },
+    // Mes anterior se compara contra el mes completo de antes (septiembre vs agosto).
+    mesanterior: { desde: startOfDay(firstOfLastMonth), hasta: endOfDay(lastOfLastMonth),
+      prev: { desde: startOfDay(new Date(now.getFullYear(), now.getMonth() - 2, 1)), hasta: endOfDay(new Date(now.getFullYear(), now.getMonth() - 1, 0)) } },
   };
 }
+// Fecha local como AAAA-MM-DD (para mostrar en el dashboard qué se compara).
+function fechaStr(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 
 // Para el "anterior" (comparación tipo "vs 1.711 anterior") tomamos un
 // rango previo de igual longitud, inmediatamente antes del rango actual.
@@ -172,7 +178,7 @@ function calcularFacturacion(pagados) {
   return total;
 }
 
-function calcularKpisPeriodo(orders, desde, hasta) {
+function calcularKpisPeriodo(orders, desde, hasta, prevFijo) {
   const enRango = orders.filter((o) => inRange(o.created_at, desde, hasta) && pedidoCuenta(o));
   const pagados = enRango.filter(itemsCuentanVenta);
 
@@ -188,7 +194,8 @@ function calcularKpisPeriodo(orders, desde, hasta) {
   const facturacionTotal = calcularFacturacion(pagados);
   const ticketPromedio = pagados.length > 0 ? facturacionTotal / pagados.length : 0;
 
-  const prev = previousRange(desde, hasta);
+  // Hoy, ayer y los "últimos N días" se comparan contra los N días inmediatamente anteriores.
+  const prev = prevFijo || previousRange(desde, hasta);
   const enRangoPrev = orders.filter((o) => inRange(o.created_at, prev.desde, prev.hasta) && pedidoCuenta(o));
   const pagadosPrev = enRangoPrev.filter(itemsCuentanVenta);
   const facturacionAnterior = calcularFacturacion(pagadosPrev);
@@ -202,6 +209,10 @@ function calcularKpisPeriodo(orders, desde, hasta) {
     facturacionTotal,
     facturacionAnterior,
     ticketPromedio,
+    actualDesde: fechaStr(desde),
+    actualHasta: fechaStr(hasta),
+    anteriorDesde: fechaStr(prev.desde),
+    anteriorHasta: fechaStr(prev.hasta),
   };
 }
 
@@ -427,8 +438,8 @@ async function main() {
   const porCategoriaPorPeriodo = {};
   const porTallePorPeriodo = {};
 
-  Object.entries(periods).forEach(([key, { desde, hasta }]) => {
-    kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta);
+  Object.entries(periods).forEach(([key, { desde, hasta, prev }]) => {
+    kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta, prev);
     masVendidosPorPeriodo[key] = calcularMasVendidos(orders, desde, hasta);
     porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta);
     porTallePorPeriodo[key] = calcularPorTalle(orders, desde, hasta, variantMeta);

@@ -1339,7 +1339,11 @@
       if (!anterior) { el.textContent = ""; return; }
       const pct = ((actual - anterior) / anterior) * 100;
       const up = pct >= 0;
-      el.textContent = `${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs anterior`;
+      // Fechas exactas de lo que se compara (las manda sync.js; si todavía no están, queda el texto de antes).
+      const fd = s => { const [a, m, d] = String(s).split("-"); return `${+d}/${+m}`; };
+      const rango = (d, h) => d === h ? fd(d) : `${fd(d)} – ${fd(h)}`;
+      el.innerHTML = `${up ? "▲" : "▼"} ${Math.abs(pct).toFixed(0)}% vs ${kpis.anteriorDesde ? rango(kpis.anteriorDesde, kpis.anteriorHasta) : "anterior"}`
+        + (kpis.anteriorDesde ? `<div class="font-normal text-slate-400 mt-0.5">${rango(kpis.actualDesde, kpis.actualHasta)} vs ${rango(kpis.anteriorDesde, kpis.anteriorHasta)}</div>` : "");
       el.className = "text-xs mt-1 font-semibold " + (up ? "text-green-600" : "text-red-500");
     }
     delta("kFacturacionDelta", kpis.facturacionTotal, kpis.facturacionAnterior);
