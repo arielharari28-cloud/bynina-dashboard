@@ -1107,6 +1107,21 @@
   function clTopVentas() { return clProds().filter(p => !(clDe(p) || {}).rechazado && (p.stockTotal || 0) > 0 && clVend(p, "30dias") > 0).sort((a, b) => clVend(b, "30dias") - clVend(a, "30dias")).slice(0, CL_TOP); }
   const clDias = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
   function clEstado(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return "sin"; if (v >= 5 && st <= Math.max(10, v)) return "rep"; return ""; }
+  // ---- Empujar: días de stock al ritmo de venta del período elegido en el Foco ----
+  const FOCO_EMPUJAR_DIAS = 45; // desde cuántos días de stock se marca "Empujar"
+  let focoOrden = "vend"; // vend | dias | stock
+  db.ref("dashboard_foco/orden").on("value", s => { if (s.val()) focoOrden = s.val(); if (data) renderFoco(); });
+  const FOCO_ORDENES = [["vend", "Más vendidos"], ["dias", "Más días de stock"], ["stock", "Más stock"]];
+  const focoPerDias = () => (data && data.periodosDias && data.periodosDias[focoPeriodo]) || parseInt(focoPeriodo) || 30;
+  // Días de stock (Infinity si tiene stock y no vendió nada en el período; null si no tiene stock).
+  function focoDiasStock(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return null; return v > 0 ? st / (v / focoPerDias()) : Infinity; }
+  // Un producto recién entrado no se marca como clavado aunque todavía no venda.
+  const focoEsNuevo = p => { const d = clDias(p.creado); return d != null && d <= CL_NEWIN_DIAS; };
+  // "emp" = empujar (muchos días de stock) · "sv" = sin ventas en el período (con stock y no es nuevo)
+  function focoEmpuje(p) { const ds = focoDiasStock(p); if (ds == null || clEstado(p)) return "";
+    if (ds === Infinity) return focoEsNuevo(p) ? "" : "sv";
+    return ds >= FOCO_EMPUJAR_DIAS ? "emp" : ""; }
+  const focoDiasTxt = ds => ds == null ? "" : ds === Infinity ? "sin ventas en el período" : "~" + Math.round(ds) + " días de stock";
 
   // Estado guardado de un producto, en el mismo formato que el borrador (para saber si hay cambios sin guardar).
   const clGuardado = p => { const c = clDe(p) || {}; return { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: clTendDe(p).filter(t => !clEsGrupo(t)) }; };
@@ -1209,16 +1224,35 @@
       const bf = focoBaseFiltro[nom] || "";
       if (bf) ps = ps.filter(p => clDe(p).base === bf);
       if (focoOcultarSin) ps = ps.filter(p => (p.stockTotal || 0) > 0);
-      ps.sort((a, b) => ((b.stockTotal || 0) > 0) - ((a.stockTotal || 0) > 0) || clVend(b) - clVend(a) || (b.stockTotal || 0) - (a.stockTotal || 0));
-      const card = p => { const e = clEstado(p);
+      const dsOrd = p => { const d = focoDiasStock(p); return d == null ? -1 : d === Infinity ? 1e9 : d; };
+      const crit = focoOrden === "dias" ? (a, b) => dsOrd(b) - dsOrd(a)
+        : focoOrden === "stock" ? (a, b) => (b.stockTotal || 0) - (a.stockTotal || 0) || clVend(b) - clVend(a)
+        : (a, b) => clVend(b) - clVend(a) || (b.stockTotal || 0) - (a.stockTotal || 0);
+      ps.sort((a, b) => ((b.stockTotal || 0) > 0) - ((a.stockTotal || 0) > 0) || crit(a, b));
+      const empN = ps.filter(p => focoEmpuje(p)).length, repN = ps.filter(p => clEstado(p) === "rep").length;
+      const paraEmpujar = ps.filter(p => focoEmpuje(p)).sort((a, b) => dsOrd(b) - dsOrd(a)).slice(0, 6);
+      const card = p => { const e = clEstado(p), em = focoEmpuje(p), ds = focoDiasStock(p);
         const cls = e === "sin" ? "border-red-300 bg-red-50" : e === "rep" ? "border-amber-300 bg-amber-50" : "border-slate-200";
-        return `<div class="border ${cls} rounded-xl p-2 flex flex-col relative">
-          ${e === "sin" ? '<span class="chip absolute" style="top:12px;left:12px;background:#dc2626;color:#fff">Sin stock</span>' : e === "rep" ? '<span class="chip absolute" style="top:12px;left:12px;background:#f59e0b;color:#fff">Reponer</span>' : ""}
+        const sty = em ? "border-color:#8A3B2E;border-width:2px;background:#FBF3EE" : "";
+        const col = em ? "#8A3B2E" : e === "rep" ? "#92400e" : "#2D5A3A";
+        return `<div class="border ${cls} rounded-xl p-2 flex flex-col relative" style="${sty}">
+          ${e === "sin" ? '<span class="chip absolute" style="top:12px;left:12px;background:#dc2626;color:#fff">Sin stock</span>' : e === "rep" ? '<span class="chip absolute" style="top:12px;left:12px;background:#f59e0b;color:#fff">Reponer</span>' : em ? `<span class="chip absolute" style="top:12px;left:12px;background:#8A3B2E;color:#fff">${em === "sv" ? "Sin ventas" : "Empujar"}</span>` : ""}
           <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100 mb-2" onerror="this.style.visibility='hidden'" />
           <div class="text-xs font-semibold leading-tight mb-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${focoEsc(p.producto)}</div>
-          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(p.stockTotal || 0)}</b> u. · ${fmtNum(clVend(p))} vend.</div></div>`; };
-      return `<div class="card p-4"><div class="flex justify-between items-baseline mb-2 flex-wrap gap-2"><div class="font-bold">${focoEsc(nom.toUpperCase())}</div><div class="text-xs text-slate-500">${total} producto${total !== 1 ? "s" : ""} · ${fmtNum(stockTot)} u. · ${fmtNum(vendTot)} vendidas${sinN ? ` · <b style="color:#b91c1c">${sinN} sin stock</b>` : ""}</div></div>
+          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(p.stockTotal || 0)}</b> u. · ${fmtNum(clVend(p))} vend.</div>
+          ${ds != null ? `<div class="text-xs font-bold mt-0.5" style="color:${col}">${focoDiasTxt(ds)}</div>` : ""}</div>`; };
+      const mini = p => { const ds = focoDiasStock(p);
+        return `<div class="flex gap-2 items-center rounded-lg p-1.5" style="background:#fff;border:1px solid #EAD8CE">
+          <img src="${p.imagen || ""}" class="w-10 aspect-[3/4] object-cover rounded bg-slate-100 shrink-0" onerror="this.style.visibility='hidden'" />
+          <div class="min-w-0"><div class="text-[11px] font-semibold truncate">${focoEsc(p.producto)}</div>
+          <div class="text-[11px] text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p))} vend.</div>
+          <div class="text-[11px] font-bold" style="color:#8A3B2E">${ds === Infinity ? "Sin ventas" : "~" + Math.round(ds) + " días"}</div></div></div>`; };
+      const franja = paraEmpujar.length ? `<div class="rounded-xl p-3 mb-3" style="background:#F7EDE6;border:1px solid #E9CFC2">
+          <div class="flex justify-between items-baseline flex-wrap gap-1 mb-2"><div class="text-sm font-bold" style="color:#8A3B2E">Para empujar en ${focoEsc(nom)}</div><div class="text-[11px]" style="color:#7A5A50">Los de más días de stock · los sin ventas primero</div></div>
+          <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">${paraEmpujar.map(mini).join("")}</div></div>` : "";
+      return `<div class="card p-4"><div class="flex justify-between items-baseline mb-2 flex-wrap gap-2"><div class="font-bold">${focoEsc(nom.toUpperCase())}</div><div class="text-xs text-slate-500">${total} producto${total !== 1 ? "s" : ""} · ${fmtNum(stockTot)} u. · ${fmtNum(vendTot)} vendidas${sinN ? ` · <b style="color:#b91c1c">${sinN} sin stock</b>` : ""}${empN ? ` · <b style="color:#8A3B2E">${empN} para empujar</b>` : ""}${repN ? ` · <b style="color:#92400e">${repN} para reponer</b>` : ""}</div></div>
         ${basesHay.length > 1 ? `<div class="flex flex-wrap gap-1.5 mb-3"><button class="pill ${!bf ? "active" : ""}" data-fbf="${focoEsc(nom)}" data-v="">Todas</button>${basesHay.map(b => `<button class="pill ${bf === b ? "active" : ""}" data-fbf="${focoEsc(nom)}" data-v="${focoEsc(b)}">${focoEsc(b)}</button>`).join("")}</div>` : ""}
+        ${franja}
         <div class="grid grid-cols-3 md:grid-cols-6 gap-2">${ps.map(card).join("") || '<div class="text-xs text-slate-400 col-span-3">Sin productos.</div>'}</div></div>`;
     }).join("");
     cont.querySelectorAll("[data-fbf]").forEach(b => b.onclick = () => { focoBaseFiltro[b.dataset.fbf] = b.dataset.v; renderFoco(); });
@@ -1236,13 +1270,15 @@
     if (!document.getElementById("focoLista") || !data) return;
     document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
     document.getElementById("focoModoBar").innerHTML = `<span class="text-xs text-slate-500 font-medium">Ver por:</span>${FOCO_MODOS.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
-      + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "");
+      + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "")
+      + (focoModo !== "tn" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${FOCO_ORDENES.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "");
     document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
+    document.querySelectorAll("[data-forden]").forEach(b => b.onclick = () => { focoOrden = b.dataset.forden; db.ref("dashboard_foco/orden").set(focoOrden); renderFoco(); });
     const oc = document.getElementById("focoOcSin"); if (oc) oc.onchange = () => { focoOcultarSin = oc.checked; db.ref("dashboard_foco/ocultarSinStock").set(focoOcultarSin); renderFoco(); };
     document.getElementById("focoCats").style.display = focoModo === "tn" ? "" : "none";
     document.getElementById("focoLeyenda").textContent = focoModo === "tn"
       ? "En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer)."
-      : "Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Los productos sin clasificar o rechazados no aparecen acá.";
+      : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
     if (focoModo !== "tn") {
       document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
       renderFocoClasif(); return;
