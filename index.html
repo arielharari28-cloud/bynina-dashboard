@@ -1114,7 +1114,7 @@
   const FOCO_ORDENES = [["vend", "Más vendidos"], ["dias", "Más días de stock"], ["stock", "Más stock"]];
   const focoPerDias = () => (data && data.periodosDias && data.periodosDias[focoPeriodo]) || parseInt(focoPeriodo) || 30;
   // Días de stock (Infinity si tiene stock y no vendió nada en el período; null si no tiene stock).
-  function focoDiasStock(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return null; return v > 0 ? st / (v / focoPerDias()) : Infinity; }
+  function focoDiasStock(p) { const st = p.stockTotal || 0, v = focoVendC(p); if (st <= 0) return null; return v > 0 ? st / (v / focoPerDias()) : Infinity; }
   // Un producto recién entrado no se marca como clavado aunque todavía no venda.
   const focoEsNuevo = p => { const d = clDias(p.creado); return d != null && d <= CL_NEWIN_DIAS; };
   // "emp" = empujar (muchos días de stock) · "sv" = sin ventas en el período (con stock y no es nuevo)
@@ -1122,6 +1122,131 @@
     if (ds === Infinity) return focoEsNuevo(p) ? "" : "sv";
     return ds >= FOCO_EMPUJAR_DIAS ? "emp" : ""; }
   const focoDiasTxt = ds => ds == null ? "" : ds === Infinity ? "sin ventas en el período" : "~" + Math.round(ds) + " días de stock";
+  // En los "Reponer": qué color empujar (el de más días de stock, con al menos FOCO_EMPUJAR_MIN u.)
+  // y qué colores reponer (mismo criterio que el modal de reposición: sin stock o ≤15 días).
+  // ---- Ventas del local (reporte "Artículos más vendidos" del sistema del local, subido a mano) ----
+  // dashboard_local = { desde, hasta, cargado, items: [{ k: código, d: descripción, u: unidades, c: [[color, u], ...] }] }
+  // dashboard_local_map = { <código saneado>: productId | "x" (ignorar) } — cruces asignados a mano.
+  let localData = null, localMap = {}, focoCanal = "todo", localIdx = null, localPanel = false;
+  const FOCO_CANALES = [["web", "Web"], ["local", "Local"], ["todo", "Todo"]];
+  db.ref("dashboard_local").on("value", s => { localData = s.val(); localIdx = null; if (data) renderFoco(); });
+  db.ref("dashboard_local_map").on("value", s => { localMap = s.val() || {}; localIdx = null; if (data) renderFoco(); });
+  db.ref("dashboard_foco/canal").on("value", s => { if (s.val()) focoCanal = s.val(); if (data) renderFoco(); });
+  const lcNorm = s => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const lcKey = k => String(k).replace(/[.#$/\[\]]/g, "_");
+  const localDias = () => { if (!localData || !localData.desde || !localData.hasta) return 30;
+    return Math.max(1, Math.round((new Date(localData.hasta) - new Date(localData.desde)) / 86400000) + 1); };
+  // Cruza cada código del local con un producto de Tienda Nube: asignación manual → SKU → nombre igual → nombre contenido (único).
+  function localIndice() {
+    if (localIdx && localIdx.data === data) return localIdx;
+    const porProd = new Map(), sinCruzar = [];
+    const prods = (data && data.productos || []).filter(p => p.id != null);
+    const porSku = new Map(), porNombre = new Map();
+    prods.forEach(p => { (p.variantes || []).forEach(v => { if (v.sku) porSku.set(lcNorm(v.sku), p); });
+      const n = lcNorm(p.producto); if (n && !porNombre.has(n)) porNombre.set(n, p); });
+    const buscar = it => {
+      const m = localMap[lcKey(it.k)];
+      if (m === "x") return "x";
+      if (m) return prods.find(p => String(p.id) === String(m)) || null;
+      const sk = porSku.get(lcNorm(it.k)); if (sk) return sk;
+      const n = lcNorm(it.d); if (porNombre.has(n)) return porNombre.get(n);
+      if (n.length >= 12) { const c = prods.filter(p => { const q = lcNorm(p.producto); return q.length >= 12 && (q.includes(n) || n.includes(q)); });
+        if (c.length === 1) return c[0]; }
+      return null;
+    };
+    ((localData && localData.items) || []).forEach(it => {
+      const p = buscar(it);
+      if (p === "x") return;
+      if (!p) { if (it.u > 0) sinCruzar.push(it); return; }
+      const e = porProd.get(p.id) || { u: 0, colores: new Map() };
+      e.u += it.u;
+      (it.c || []).forEach(([col, u]) => { const k = lcNorm(col); e.colores.set(k, (e.colores.get(k) || 0) + u); });
+      porProd.set(p.id, e);
+    });
+    sinCruzar.sort((a, b) => b.u - a.u);
+    localIdx = { data, porProd, sinCruzar };
+    return localIdx;
+  }
+  // Venta del local llevada al período elegido (el reporte es un total del rango cargado → promedio diario × días).
+  const focoFactorLocal = () => focoPerDias() / localDias();
+  const localVend = p => { if (!localData) return 0; const e = localIndice().porProd.get(p.id); return e ? e.u * focoFactorLocal() : 0; };
+  const focoVendC = p => focoCanal === "web" ? clVend(p) : focoCanal === "local" ? localVend(p) : clVend(p) + localVend(p);
+  const localColorVend = (p, color) => { if (!localData || focoCanal === "web") return 0; const e = localIndice().porProd.get(p.id);
+    return e ? (e.colores.get(lcNorm(color)) || 0) * focoFactorLocal() : 0; };
+  // Lee los Excel del local (uno o varios, por el límite de 300 filas) y los guarda unidos.
+  async function localSubir(files, desde, hasta) {
+    const acc = new Map();
+    for (const f of files) {
+      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null });
+      const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo"));
+      if (h < 0) throw new Error(`"${f.name}" no tiene la columna Codigo.`);
+      const col = n => rows[h].findIndex(c => lcNorm(c) === n);
+      const iK = col("codigo"), iD = col("descripcion"), iU = col("cantidad"), iC = col("color");
+      if (iD < 0 || iU < 0) throw new Error(`"${f.name}" no tiene Descripcion o Cantidad.`);
+      rows.slice(h + 1).forEach(r => {
+        if (!r || r[iK] == null || r[iU] == null) return;
+        const k = String(r[iK]).trim(), u = Number(r[iU]) || 0, color = iC >= 0 && r[iC] ? String(r[iC]).trim() : "Sin color";
+        const e = acc.get(k) || { k, d: String(r[iD] || "").trim(), u: 0, c: {} };
+        e.u += u; e.c[color] = (e.c[color] || 0) + u; acc.set(k, e);
+      });
+    }
+    const items = Array.from(acc.values()).map(e => ({ k: e.k, d: e.d, u: e.u, c: Object.entries(e.c) }));
+    await db.ref("dashboard_local").set({ desde, hasta, cargado: new Date().toISOString(), archivos: files.length, items });
+    return items;
+  }
+  function localBarra() {
+    const ld = localData, idx = ld ? localIndice() : null;
+    const fmtF = s => s ? s.split("-").reverse().slice(0, 2).join("/") : "";
+    const hoy = new Date(), hace = new Date(hoy - 29 * 86400000), iso = d => d.toISOString().slice(0, 10);
+    const tot = ld ? (ld.items || []).reduce((s, i) => s + (i.u || 0), 0) : 0;
+    const estado = ld ? `🏬 Local cargado: ${fmtF(ld.desde)} al ${fmtF(ld.hasta)} · ${fmtNum(tot)} u. · ${fmtNum((ld.items || []).length)} artículos${idx.sinCruzar.length ? ` · <button class="underline font-semibold" style="color:#92400e" id="lcVerSin">${idx.sinCruzar.length} sin cruzar</button>` : " · todo cruzado"}`
+      : "🏬 Todavía no hay ventas del local cargadas.";
+    const opts = localPanel === "sin" ? (data.productos || []).filter(p => p.id != null).sort((a, b) => String(a.producto).localeCompare(String(b.producto)))
+      .map(p => `<option value="${p.id}">${focoEsc(p.producto)}</option>`).join("") : "";
+    const panel = localPanel === "subir" ? `<div class="card p-3 mt-2 text-sm space-y-2">
+        <div>Elegí todos los Excel del reporte "Artículos más vendidos" juntos y el rango de fechas que cubren. Reemplaza la carga anterior.</div>
+        <div class="flex flex-wrap gap-2 items-center"><label class="text-xs">Desde <input type="date" id="lcDesde" value="${iso(hace)}" class="border rounded px-2 py-1"></label>
+        <label class="text-xs">Hasta <input type="date" id="lcHasta" value="${iso(hoy)}" class="border rounded px-2 py-1"></label>
+        <input type="file" id="lcFiles" accept=".xlsx,.xls" multiple class="text-xs">
+        <button class="pill active" id="lcGuardar">Guardar</button><span id="lcMsg" class="text-xs"></span></div></div>`
+      : localPanel === "sin" && idx ? `<div class="card p-3 mt-2 text-sm"><div class="mb-2">Artículos del local que no encontré en Tienda Nube. Elegí a cuál corresponde cada uno (se recuerda para las próximas cargas) o ignoralo.</div>
+        <div class="space-y-1.5">${idx.sinCruzar.map(it => `<div class="flex flex-wrap gap-2 items-center"><span class="text-xs w-full md:w-80 truncate"><b>${fmtNum(it.u)}</b> u. · ${focoEsc(it.d)} <span class="text-slate-400">(${focoEsc(it.k)})</span></span>
+          <select class="border rounded px-2 py-1 text-xs max-w-xs" data-lcmap="${focoEsc(lcKey(it.k))}"><option value="">Asignar a…</option><option value="x">Ignorar (no es de la web)</option>${opts}</select></div>`).join("")}</div></div>` : "";
+    return `<div class="w-full text-xs text-slate-600 flex flex-wrap gap-2 items-center"><span>${estado}</span>
+      <button class="pill" id="lcSubir">${ld ? "Actualizar ventas del local" : "Subir ventas del local"}</button></div>${panel}`;
+  }
+  function localBarraEventos() {
+    const q = id => document.getElementById(id);
+    if (q("lcSubir")) q("lcSubir").onclick = () => { localPanel = localPanel === "subir" ? false : "subir"; renderFoco(); };
+    if (q("lcVerSin")) q("lcVerSin").onclick = () => { localPanel = localPanel === "sin" ? false : "sin"; renderFoco(); };
+    if (q("lcGuardar")) q("lcGuardar").onclick = async () => {
+      const files = Array.from(q("lcFiles").files || []), msg = q("lcMsg");
+      if (!files.length) { msg.textContent = "Elegí los archivos primero."; msg.style.color = "#b91c1c"; return; }
+      if (!q("lcDesde").value || !q("lcHasta").value || q("lcDesde").value > q("lcHasta").value) { msg.textContent = "Revisá las fechas."; msg.style.color = "#b91c1c"; return; }
+      msg.textContent = "Leyendo…"; msg.style.color = "";
+      try { const items = await localSubir(files, q("lcDesde").value, q("lcHasta").value); localPanel = false;
+        alert(`Listo: ${files.length} archivo(s), ${items.length} artículos, ${fmtNum(items.reduce((s, i) => s + i.u, 0))} unidades.`); }
+      catch (err) { msg.textContent = "No se pudo cargar: " + err.message; msg.style.color = "#b91c1c"; }
+    };
+    document.querySelectorAll("[data-lcmap]").forEach(s => s.onchange = () => { if (s.value) db.ref("dashboard_local_map/" + s.dataset.lcmap).set(s.value); });
+  }
+  const FOCO_EMPUJAR_MIN = 5;
+  function focoColoresRep(p) {
+    let colores;
+    try { colores = agruparReposicion(calcularReposicion(p, focoPeriodo), "color", focoPeriodo); } catch (err) { return ""; }
+    if (!colores.length) return "";
+    // Días de stock del color con la venta del canal elegido (web + local en "Todo"); el stock es el de la web.
+    const perD = diasParaPeriodo(focoPeriodo);
+    const dsCol = c => { const u = (focoCanal === "local" ? 0 : c.unidades) + localColorVend(p, c.color); return u > 0 ? c.stock / (u / perD) : Infinity; };
+    const reponer = colores.filter(c => c.orden === 0 || c.orden === 1).map(c => c.color);
+    const empujar = colores.filter(c => c.stock >= FOCO_EMPUJAR_MIN && !reponer.includes(c.color))
+      .sort((a, b) => dsCol(b) - dsCol(a) || b.stock - a.stock)[0];
+    const todos = reponer.length && reponer.length === colores.filter(c => c.unidades > 0 || c.stock > 0).length;
+    return `<div class="text-[11px] leading-snug mt-1.5 pt-1.5" style="border-top:1px solid #f3e3c3">
+      ${empujar ? `<div style="color:#2D5A3A">↗ Empujá: <b>${focoEsc(empujar.color)}</b> · ${fmtNum(empujar.stock)} u.</div>` : `<div class="text-slate-500">Ningún color para empujar</div>`}
+      ${reponer.length ? `<div style="color:#b91c1c">↻ Reponer: ${todos && colores.length > 1 ? "todos" : reponer.map(focoEsc).join(", ")}</div>` : ""}</div>`;
+  }
 
   // Estado guardado de un producto, en el mismo formato que el borrador (para saber si hay cambios sin guardar).
   const clGuardado = p => { const c = clDe(p) || {}; return { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: clTendDe(p).filter(t => !clEsGrupo(t)) }; };
@@ -1208,7 +1333,10 @@
   function renderFocoClasif() {
     const cont = document.getElementById("focoLista");
     let secciones;
-    if (focoModo === "grupo") { const topIds = new Set(clTopVentas().map(p => p.id));
+    if (focoModo === "grupo") {
+      // "Más vendidos" con la venta del canal elegido (30 días, igual que en Clasificar).
+      const v30 = p => (focoCanal === "local" ? 0 : clVend(p, "30dias")) + (focoCanal === "web" || !localData ? 0 : ((localIndice().porProd.get(p.id) || {}).u || 0) * 30 / localDias());
+      const topIds = new Set(clProds().filter(p => !(clDe(p) || {}).rechazado && (p.stockTotal || 0) > 0 && v30(p) > 0).sort((a, b) => v30(b) - v30(a)).slice(0, CL_TOP).map(p => p.id));
       secciones = [["Más vendidos", p => topIds.has(p.id)], ...CL_GRUPOS.map(g => [g, p => clGrupo(p) === g])]; }
     else if (focoModo === "tendencia") secciones = clCfg.tendencias.map(t => [t, p => !!(clDe(p).tendencias || {})[clKey(t)]]);
     else secciones = clCfg.bases.map(b => [b, p => clDe(p).base === b]);
@@ -1219,19 +1347,19 @@
     cont.innerHTML = aviso + secciones.map(([nom, fn]) => {
       let ps = asig.filter(fn);
       const total = ps.length, sinN = ps.filter(p => (p.stockTotal || 0) <= 0).length;
-      const stockTot = ps.reduce((s, p) => s + (p.stockTotal || 0), 0), vendTot = ps.reduce((s, p) => s + clVend(p), 0);
+      const stockTot = ps.reduce((s, p) => s + (p.stockTotal || 0), 0), vendTot = Math.round(ps.reduce((s, p) => s + focoVendC(p), 0));
       const basesHay = focoModo === "categoria" ? [] : clCfg.bases.filter(b => ps.some(p => clDe(p).base === b));
       const bf = focoBaseFiltro[nom] || "";
       if (bf) ps = ps.filter(p => clDe(p).base === bf);
       if (focoOcultarSin) ps = ps.filter(p => (p.stockTotal || 0) > 0);
       const dsOrd = p => { const d = focoDiasStock(p); return d == null ? -1 : d === Infinity ? 1e9 : d; };
       const crit = focoOrden === "dias" ? (a, b) => dsOrd(b) - dsOrd(a)
-        : focoOrden === "stock" ? (a, b) => (b.stockTotal || 0) - (a.stockTotal || 0) || clVend(b) - clVend(a)
-        : (a, b) => clVend(b) - clVend(a) || (b.stockTotal || 0) - (a.stockTotal || 0);
+        : focoOrden === "stock" ? (a, b) => (b.stockTotal || 0) - (a.stockTotal || 0) || focoVendC(b) - focoVendC(a)
+        : (a, b) => focoVendC(b) - focoVendC(a) || (b.stockTotal || 0) - (a.stockTotal || 0);
       ps.sort((a, b) => ((b.stockTotal || 0) > 0) - ((a.stockTotal || 0) > 0) || crit(a, b));
       const empN = ps.filter(p => focoEmpuje(p)).length, repN = ps.filter(p => clEstado(p) === "rep").length;
       const paraEmpujar = ps.filter(p => focoEmpuje(p)).sort((a, b) => dsOrd(b) - dsOrd(a)).slice(0, 6);
-      const card = p => { const e = clEstado(p), em = focoEmpuje(p), ds = focoDiasStock(p);
+      const card = p => { const e = clEstado(p), em = focoEmpuje(p), ds = e === "rep" ? (clVend(p) > 0 ? (p.stockTotal || 0) / (clVend(p) / focoPerDias()) : null) : focoDiasStock(p);
         const cls = e === "sin" ? "border-red-300 bg-red-50" : e === "rep" ? "border-amber-300 bg-amber-50" : "border-slate-200";
         const sty = em ? "border-color:#8A3B2E;border-width:2px;background:#FBF3EE" : "";
         const col = em ? "#8A3B2E" : e === "rep" ? "#92400e" : "#2D5A3A";
@@ -1239,13 +1367,15 @@
           ${e === "sin" ? '<span class="chip absolute" style="top:12px;left:12px;background:#dc2626;color:#fff">Sin stock</span>' : e === "rep" ? '<span class="chip absolute" style="top:12px;left:12px;background:#f59e0b;color:#fff">Reponer</span>' : em ? `<span class="chip absolute" style="top:12px;left:12px;background:#8A3B2E;color:#fff">${em === "sv" ? "Sin ventas" : "Empujar"}</span>` : ""}
           <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100 mb-2" onerror="this.style.visibility='hidden'" />
           <div class="text-xs font-semibold leading-tight mb-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${focoEsc(p.producto)}</div>
-          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(p.stockTotal || 0)}</b> u. · ${fmtNum(clVend(p))} vend.</div>
-          ${ds != null ? `<div class="text-xs font-bold mt-0.5" style="color:${col}">${focoDiasTxt(ds)}</div>` : ""}</div>`; };
+          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(p.stockTotal || 0)}</b> u. web · ${fmtNum(Math.round(focoVendC(p)))} vend.</div>
+          ${focoCanal === "todo" && localData ? `<div class="text-[11px] text-slate-400">${fmtNum(clVend(p))} web · ${fmtNum(Math.round(localVend(p)))} local</div>` : ""}
+          ${ds != null && (focoCanal === "web" || e || em) ? `<div class="text-xs font-bold mt-0.5" style="color:${col}">${focoDiasTxt(ds)}${e === "rep" ? " web" : ""}</div>` : ""}
+          ${e === "rep" ? focoColoresRep(p) : ""}</div>`; };
       const mini = p => { const ds = focoDiasStock(p);
         return `<div class="flex gap-2 items-center rounded-lg p-1.5" style="background:#fff;border:1px solid #EAD8CE">
           <img src="${p.imagen || ""}" class="w-10 aspect-[3/4] object-cover rounded bg-slate-100 shrink-0" onerror="this.style.visibility='hidden'" />
           <div class="min-w-0"><div class="text-[11px] font-semibold truncate">${focoEsc(p.producto)}</div>
-          <div class="text-[11px] text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p))} vend.</div>
+          <div class="text-[11px] text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(Math.round(focoVendC(p)))} vend.</div>
           <div class="text-[11px] font-bold" style="color:#8A3B2E">${ds === Infinity ? "Sin ventas" : "~" + Math.round(ds) + " días"}</div></div></div>`; };
       const franja = paraEmpujar.length ? `<div class="rounded-xl p-3 mb-3" style="background:#F7EDE6;border:1px solid #E9CFC2">
           <div class="flex justify-between items-baseline flex-wrap gap-1 mb-2"><div class="text-sm font-bold" style="color:#8A3B2E">Para empujar en ${focoEsc(nom)}</div><div class="text-[11px]" style="color:#7A5A50">Los de más días de stock · los sin ventas primero</div></div>
@@ -1271,14 +1401,17 @@
     document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
     document.getElementById("focoModoBar").innerHTML = `<span class="text-xs text-slate-500 font-medium">Ver por:</span>${FOCO_MODOS.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
       + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "")
-      + (focoModo !== "tn" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${FOCO_ORDENES.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "");
+      + (focoModo !== "tn" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${FOCO_ORDENES.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "")
+      + (focoModo !== "tn" ? `<span class="w-full flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de:</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>${localBarra()}` : "");
     document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
     document.querySelectorAll("[data-forden]").forEach(b => b.onclick = () => { focoOrden = b.dataset.forden; db.ref("dashboard_foco/orden").set(focoOrden); renderFoco(); });
+    document.querySelectorAll("[data-fcanal]").forEach(b => b.onclick = () => { focoCanal = b.dataset.fcanal; db.ref("dashboard_foco/canal").set(focoCanal); renderFoco(); });
+    localBarraEventos();
     const oc = document.getElementById("focoOcSin"); if (oc) oc.onchange = () => { focoOcultarSin = oc.checked; db.ref("dashboard_foco/ocultarSinStock").set(focoOcultarSin); renderFoco(); };
     document.getElementById("focoCats").style.display = focoModo === "tn" ? "" : "none";
     document.getElementById("focoLeyenda").textContent = focoModo === "tn"
       ? "En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer)."
-      : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
+      : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido (web, local o las dos, según "Ventas de"). Reponer mira solo la web: se vende online y queda poco cargado. El local se lleva al período como promedio diario del reporte cargado. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
     if (focoModo !== "tn") {
       document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
       renderFocoClasif(); return;
