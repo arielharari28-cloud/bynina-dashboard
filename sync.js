@@ -1,37 +1,30 @@
 /**
  * sync.js
  * ---------------------------------------------------------------
- * Trae pedidos y productos desde la API de Tienda Nube, calcula los
- * KPIs del dashboard (para varios rangos de fecha) y los guarda en
- * Firebase Realtime Database.
+ * Trae pedidos y productos desde la API de Tienda Nube, y arma un
+ * único array `productos` con toda la info que necesita el
+ * dashboard (stock por color/talle, ventas históricas y por
+ * período, categoría, fecha de alta). Así el frontend puede
+ * filtrar/ordenar libremente sin tener que correr el sync de nuevo.
  *
  * Corre desde GitHub Actions. Nunca expone el token de Tienda Nube
- * ni las credenciales de Firebase al navegador: todo queda en este
- * proceso server-side, leyendo secretos de variables de entorno.
+ * ni las credenciales de Firebase al navegador.
  *
- * Variables de entorno requeridas (se cargan como GitHub Secrets):
- *   TN_STORE_ID              -> Store ID de Tienda Nube
- *   TN_ACCESS_TOKEN          -> Access Token de la app a medida
- *   FIREBASE_DB_URL          -> URL de la Realtime Database (https://bynina-c1eec-default-rtdb...)
- *   FIREBASE_SERVICE_ACCOUNT -> JSON completo de la service account de Firebase (como string)
+ * Variables de entorno requeridas (GitHub Secrets):
+ *   TN_STORE_ID, TN_ACCESS_TOKEN, FIREBASE_DB_URL, FIREBASE_SERVICE_ACCOUNT
  * ---------------------------------------------------------------
  */
 
 const admin = require("firebase-admin");
 
-// ---------- Config ----------
 const TN_API_VERSION = "2025-03";
 const TN_STORE_ID = process.env.TN_STORE_ID;
 const TN_ACCESS_TOKEN = process.env.TN_ACCESS_TOKEN;
 const TN_BASE_URL = `https://api.tiendanube.com/${TN_API_VERSION}/${TN_STORE_ID}`;
 const USER_AGENT = "ByNINA Dashboard (dashboard@bynina.com.ar)";
 
-// Umbral para "últimas unidades" (alerta de stock bajo)
 const LOW_STOCK_THRESHOLD = 8;
-// Umbral de días sin venta para aparecer en "Sin ventas recientes"
-const SIN_VENTAS_DIAS = 14;
 
-// ---------- Firebase init ----------
 function initFirebase() {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
   admin.initializeApp({
@@ -41,15 +34,12 @@ function initFirebase() {
   return admin.database();
 }
 
-// ---------- Tienda Nube fetch helpers ----------
 async function tnFetch(path, params = {}) {
   const url = new URL(`${TN_BASE_URL}${path}`);
   Object.entries(params).forEach(([k, v]) => {
     if (v !== undefined && v !== null) url.searchParams.set(k, v);
   });
 
-  // Timeout de seguridad: si Tienda Nube no responde en 20s, cortamos
-  // el pedido en vez de dejar el proceso colgado esperando para siempre.
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000);
 
@@ -65,9 +55,7 @@ async function tnFetch(path, params = {}) {
       signal: controller.signal,
     });
   } catch (err) {
-    if (err.name === "AbortError") {
-      throw new Error(`Tienda Nube API: timeout de 20s en ${path}`);
-    }
+    if (err.name === "AbortError") throw new Error(`Tienda Nube API: timeout de 20s en ${path}`);
     throw err;
   } finally {
     clearTimeout(timeoutId);
@@ -80,7 +68,6 @@ async function tnFetch(path, params = {}) {
   return res.json();
 }
 
-// Trae TODAS las páginas de un recurso (orders o products)
 async function fetchAllPages(path, params = {}) {
   const perPage = 200;
   let page = 1;
@@ -96,49 +83,58 @@ async function fetchAllPages(path, params = {}) {
 }
 
 // ---------- Fechas / períodos ----------
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+// ---------- Fechas / períodos, ancladas a horario Argentina (UTC-3) ----------
+// GitHub Actions corre en UTC. Sin este ajuste, "Hoy"/"Ayer"/mes se cortan a
+// la medianoche UTC en vez de la medianoche de Buenos Aires, desfasando los
+// cortes hasta 3 horas (ventas de la noche caían en el día siguiente, etc).
+const ARG_OFFSET_MS = 3 * 60 * 60 * 1000; // Argentina no usa horario de verano
+
+function argWallClockParts(date) {
+  const shifted = new Date(date.getTime() - ARG_OFFSET_MS);
+  return { y: shifted.getUTCFullYear(), m: shifted.getUTCMonth(), d: shifted.getUTCDate() };
 }
-function endOfDay(d) {
-  const x = new Date(d);
-  x.setHours(23, 59, 59, 999);
-  return x;
+function argMidnight(y, m, d) {
+  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0) + ARG_OFFSET_MS);
+}
+function startOfDay(date) {
+  const { y, m, d } = argWallClockParts(date);
+  return argMidnight(y, m, d);
+}
+function endOfDay(date) {
+  return new Date(startOfDay(date).getTime() + 24 * 60 * 60 * 1000 - 1);
 }
 function daysAgo(n) {
   const d = new Date();
-  d.setDate(d.getDate() - n);
+  d.setTime(d.getTime() - n * 24 * 60 * 60 * 1000);
   return d;
 }
 
 function buildPeriods() {
   const now = new Date();
   const today = startOfDay(now);
-  const yesterday = daysAgo(1);
-  const firstOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const { y, m, d } = argWallClockParts(now);
+
+  const yesterdayStart = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+  const yesterdayEnd = new Date(today.getTime() - 1);
+
+  const firstOfThisMonth = argMidnight(y, m, 1);
+  const firstOfLastMonth = argMidnight(y, m - 1, 1); // Date.UTC normaliza mes negativo
+  const lastOfLastMonth = new Date(firstOfThisMonth.getTime() - 1);
 
   return {
-    hoy: { desde: today, hasta: endOfDay(now) },
-    ayer: { desde: startOfDay(yesterday), hasta: endOfDay(yesterday) },
-    "7dias": { desde: startOfDay(daysAgo(7)), hasta: endOfDay(now) },
-    "15dias": { desde: startOfDay(daysAgo(15)), hasta: endOfDay(now) },
-    "30dias": { desde: startOfDay(daysAgo(30)), hasta: endOfDay(now) },
-    // Este mes se compara contra los mismos primeros días del mes anterior (1–14/10 vs 1–14/9).
-    estemes: { desde: startOfDay(firstOfThisMonth), hasta: endOfDay(now),
-      prev: { desde: startOfDay(firstOfLastMonth), hasta: endOfDay(new Date(now.getFullYear(), now.getMonth() - 1, Math.min(now.getDate(), lastOfLastMonth.getDate()))) } },
-    // Mes anterior se compara contra el mes completo de antes (septiembre vs agosto).
-    mesanterior: { desde: startOfDay(firstOfLastMonth), hasta: endOfDay(lastOfLastMonth),
-      prev: { desde: startOfDay(new Date(now.getFullYear(), now.getMonth() - 2, 1)), hasta: endOfDay(new Date(now.getFullYear(), now.getMonth() - 1, 0)) } },
+    hoy: { desde: today, hasta: endOfDay(now), dias: 1 },
+    ayer: { desde: yesterdayStart, hasta: yesterdayEnd, dias: 1 },
+    "7dias": { desde: startOfDay(daysAgo(7)), hasta: endOfDay(now), dias: 7 },
+    "15dias": { desde: startOfDay(daysAgo(15)), hasta: endOfDay(now), dias: 15 },
+    "30dias": { desde: startOfDay(daysAgo(30)), hasta: endOfDay(now), dias: 30 },
+    // 45 y 60 días: para la sección Foco (los pedidos se traen de los últimos 95 días, alcanza)
+    "45dias": { desde: startOfDay(daysAgo(45)), hasta: endOfDay(now), dias: 45 },
+    "60dias": { desde: startOfDay(daysAgo(60)), hasta: endOfDay(now), dias: 60 },
+    estemes: { desde: firstOfThisMonth, hasta: endOfDay(now), dias: d },
+    mesanterior: { desde: firstOfLastMonth, hasta: lastOfLastMonth, dias: 30 },
   };
 }
-// Fecha local como AAAA-MM-DD (para mostrar en el dashboard qué se compara).
-function fechaStr(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
 
-// Para el "anterior" (comparación tipo "vs 1.711 anterior") tomamos un
-// rango previo de igual longitud, inmediatamente antes del rango actual.
 function previousRange(desde, hasta) {
   const lengthMs = hasta.getTime() - desde.getTime();
   const prevHasta = new Date(desde.getTime() - 1);
@@ -146,129 +142,110 @@ function previousRange(desde, hasta) {
   return { desde: prevDesde, hasta: prevHasta };
 }
 
-// ---------- Cálculo de KPIs ----------
-// Estados de pedido que cuentan como venta real (ajustable si Tienda Nube
-// usa otros nombres de estado en tu cuenta).
-const ESTADOS_VALIDOS = new Set(["paid", "authorized"]); // payment_status
-const ESTADOS_CANCELADOS = new Set(["cancelled"]);
-
-function pedidoCuenta(order) {
-  if (ESTADOS_CANCELADOS.has(order.status)) return false;
-  return true; // se puede afinar luego según cómo Ariel quiera contar "pedido"
-}
-
-function itemsCuentanVenta(order) {
-  // Solo contamos unidades/productos de pedidos pagados para no inflar
-  // con carritos abandonados o pedidos pendientes de pago.
-  return ESTADOS_VALIDOS.has(order.payment_status);
-}
-
 function inRange(dateStr, desde, hasta) {
   const d = new Date(dateStr);
   return d >= desde && d <= hasta;
 }
 
-function calcularFacturacion(pagados) {
-  let total = 0;
-  pagados.forEach((o) => {
-    (o.products || []).forEach((li) => {
-      total += Number(li.price || 0) * Number(li.quantity || 0);
-    });
-  });
-  return total;
-}
+const ESTADOS_VALIDOS = new Set(["paid", "authorized"]);
+const ESTADOS_CANCELADOS = new Set(["cancelled"]);
+function pedidoCuenta(order) { return !ESTADOS_CANCELADOS.has(order.status); }
+function itemsCuentanVenta(order) { return ESTADOS_VALIDOS.has(order.payment_status); }
 
-function calcularKpisPeriodo(orders, desde, hasta, prevFijo) {
+// ---------- KPIs agregados (para las tarjetas del dashboard) ----------
+function calcularKpisPeriodo(orders, desde, hasta) {
   const enRango = orders.filter((o) => inRange(o.created_at, desde, hasta) && pedidoCuenta(o));
   const pagados = enRango.filter(itemsCuentanVenta);
 
   let unidadesVendidas = 0;
+  let facturacionTotal = 0;
   const productosVendidosSet = new Set();
   pagados.forEach((o) => {
     (o.products || []).forEach((li) => {
       unidadesVendidas += Number(li.quantity || 0);
+      facturacionTotal += Number(li.price || 0) * Number(li.quantity || 0);
       productosVendidosSet.add(li.product_id);
     });
   });
 
-  const facturacionTotal = calcularFacturacion(pagados);
-  const ticketPromedio = pagados.length > 0 ? facturacionTotal / pagados.length : 0;
-
-  // Hoy, ayer y los "últimos N días" se comparan contra los N días inmediatamente anteriores.
-  const prev = prevFijo || previousRange(desde, hasta);
+  const prev = previousRange(desde, hasta);
   const enRangoPrev = orders.filter((o) => inRange(o.created_at, prev.desde, prev.hasta) && pedidoCuenta(o));
   const pagadosPrev = enRangoPrev.filter(itemsCuentanVenta);
-  const facturacionAnterior = calcularFacturacion(pagadosPrev);
+  let facturacionAnterior = 0;
+  pagadosPrev.forEach((o) => (o.products || []).forEach((li) => {
+    facturacionAnterior += Number(li.price || 0) * Number(li.quantity || 0);
+  }));
 
   return {
     pedidos: enRango.length,
     pedidosAnterior: enRangoPrev.length,
     unidadesVendidas,
     productosVendidos: productosVendidosSet.size,
-    productosVendidosIds: Array.from(productosVendidosSet),
     facturacionTotal,
     facturacionAnterior,
-    ticketPromedio,
-    actualDesde: fechaStr(desde),
-    actualHasta: fechaStr(hasta),
-    anteriorDesde: fechaStr(prev.desde),
-    anteriorHasta: fechaStr(prev.hasta),
+    ticketPromedio: pagados.length > 0 ? facturacionTotal / pagados.length : 0,
   };
 }
 
-function calcularMasVendidos(orders, desde, hasta, top = 20) {
-  const pagados = orders.filter(
-    (o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o)
-  );
-  const acc = new Map(); // product_id -> {name, image, unidades, facturacion}
+// Ventas agrupadas por día (fecha Argentina), para permitir sumar cualquier rango custom en el cliente.
+function calcularPorDia(orders, desde, hasta) {
+  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
+  const acc = {};
   pagados.forEach((o) => {
+    const { y, m, d } = argWallClockParts(new Date(o.created_at));
+    const key = `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const prev = acc[key] || { facturacion: 0, unidades: 0 };
     (o.products || []).forEach((li) => {
-      const key = li.product_id;
-      const prev = acc.get(key) || {
-        producto: li.name,
-        unidades: 0,
-        facturacion: 0,
-        imagen: li.image?.src || null,
-      };
       prev.unidades += Number(li.quantity || 0);
       prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
-      acc.set(key, prev);
     });
+    acc[key] = prev;
   });
-  // Devolvemos ordenado por unidades por default; el frontend puede
-  // reordenar localmente por facturación sin pedir datos de nuevo.
-  return Array.from(acc.entries())
-    .map(([id, v]) => ({ id, ...v }))
-    .sort((a, b) => b.unidades - a.unidades)
-    .slice(0, top);
+  return acc;
 }
 
-// ---------- Categoría y talle (usa metadata de productos/variantes) ----------
-function calcularPorCategoria(orders, desde, hasta, productMeta, top = 8) {
-  const pagados = orders.filter(
-    (o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o)
-  );
-  const acc = new Map(); // categoria -> {unidades, facturacion}
+// Categorías reales de prenda — Tiendanube permite asignarle a un producto varias categorías
+// a la vez (la real + etiquetas de promo/colección tipo "Winter Sale"), así que si sumáramos
+// la venta a CADA categoría del producto, la misma venta se contaría varias veces y el total
+// nunca cerraría contra la facturación real. Por eso cada producto aporta su venta a UNA sola
+// categoría: la primera de esta lista que tenga asignada.
+const CATEGORIAS_REALES = [
+  "remeras", "tops", "tejidos", "sweaters", "tejidos | sweaters", "buzos",
+  "capsula importados", "cápsula importados", "gamulanes", "camperas", "gamulanes / camperas", "gamulanes/camperas",
+  "pantalones", "shorts", "pantalones - shorts", "pantalones/shorts", "body", "jeans", "jean",
+  "accesorios", "blazers", "camisas", "blazers / camisas", "blazers/camisas", "vestidos",
+];
+function normalizarCat(s) {
+  return (s || "").toString().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+function categoriaPrincipal(categorias) {
+  const lista = categorias || [];
+  const real = lista.find((c) => {
+    const n = normalizarCat(c);
+    return CATEGORIAS_REALES.some((r) => n === r || n.includes(r));
+  });
+  if (real) return real;
+  return lista[0] || "Sin categoría";
+}
+
+function calcularPorCategoria(orders, desde, hasta, productMeta, top = 8) {  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
+  const acc = new Map();
   pagados.forEach((o) => {
     (o.products || []).forEach((li) => {
       const meta = productMeta.get(li.product_id);
-      const categoria = (meta && meta.categoria) || "Sin categoría";
+      const categoria = categoriaPrincipal(meta && meta.categorias);
       const prev = acc.get(categoria) || { categoria, unidades: 0, facturacion: 0 };
       prev.unidades += Number(li.quantity || 0);
       prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
       acc.set(categoria, prev);
     });
   });
-  return Array.from(acc.values())
-    .sort((a, b) => b.unidades - a.unidades)
-    .slice(0, top);
+  return Array.from(acc.values()).sort((a, b) => b.unidades - a.unidades).slice(0, top);
 }
 
 function calcularPorTalle(orders, desde, hasta, variantMeta, top = 12) {
-  const pagados = orders.filter(
-    (o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o)
-  );
-  const acc = new Map(); // talle -> {unidades, facturacion}
+  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
+  const acc = new Map();
   pagados.forEach((o) => {
     (o.products || []).forEach((li) => {
       const meta = variantMeta.get(li.variant_id);
@@ -279,25 +256,20 @@ function calcularPorTalle(orders, desde, hasta, variantMeta, top = 12) {
       acc.set(talle, prev);
     });
   });
-  return Array.from(acc.values())
-    .sort((a, b) => b.unidades - a.unidades)
-    .slice(0, top);
+  return Array.from(acc.values()).sort((a, b) => b.unidades - a.unidades).slice(0, top);
 }
 
-// ---------- Metadata de productos/variantes (categoría, talle) ----------
+// ---------- Metadata de productos/variantes ----------
 function construirMetadata(products) {
-  const productMeta = new Map(); // product_id -> {categoria}
-  const variantMeta = new Map(); // variant_id -> {talle, color}
+  const productMeta = new Map();
+  const variantMeta = new Map();
 
   products.forEach((p) => {
-    const categoria = p.categories?.[0]?.name?.es || p.categories?.[0]?.name || null;
-    productMeta.set(p.id, { categoria });
-
+    const categorias = (p.categories || []).map((c) => c.name?.es || c.name).filter(Boolean);
+    productMeta.set(p.id, { categorias: categorias.length ? categorias : ["Sin categoría"] });
     (p.variants || []).forEach((v) => {
-      // Convención observada en el catálogo: values[0] = color, values[1] = talle.
-      // Si algún producto usa otro orden, esto puede necesitar ajuste manual.
-      productMeta.set(p.id, { categoria });
       variantMeta.set(v.id, {
+        productId: p.id,
         color: v.values?.[0]?.es || null,
         talle: v.values?.[1]?.es || v.values?.[0]?.es || null,
       });
@@ -307,109 +279,191 @@ function construirMetadata(products) {
   return { productMeta, variantMeta };
 }
 
-// ---------- Nuevos ingresos ----------
-function calcularNuevosIngresos(products, dias = 15, top = 20) {
-  const corte = daysAgo(dias);
-  return products
-    .filter((p) => p.created_at && new Date(p.created_at) >= corte)
-    .map((p) => ({
-      producto: p.name?.es || p.name,
-      imagen: p.images?.[0]?.src || null,
-      fecha: p.created_at,
-    }))
-    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha))
-    .slice(0, top);
+function calcularPorTag(orders, desde, hasta, productTags, top = 12) {
+  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
+  const acc = new Map();
+  pagados.forEach((o) => {
+    (o.products || []).forEach((li) => {
+      const tags = productTags.get(li.product_id) || [];
+      tags.forEach((tag) => {
+        const prev = acc.get(tag) || { tag, unidades: 0, facturacion: 0 };
+        prev.unidades += Number(li.quantity || 0);
+        prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
+        acc.set(tag, prev);
+      });
+    });
+  });
+  return Array.from(acc.values()).sort((a, b) => b.unidades - a.unidades).slice(0, top);
 }
 
-function calcularStockYAlertas(products) {
-  // Agrupado por producto: cada producto tiene un stock total y su lista
-  // de variantes adentro (para "agrupar por variantes" en el dashboard).
-  const stockPorProducto = [];
-  const ultimasUnidadesPorArticulo = [];
+// ---------- Ventas por producto: histórico + por período ----------
+function construirVentasPorProducto(orders, periods, variantMeta) {
+  const ventas = new Map();
 
-  products.forEach((p) => {
+  function getEntry(productId) {
+    if (!ventas.has(productId)) {
+      const porPeriodo = {};
+      const colorPorPeriodo = {};
+      const tallePorPeriodo = {};
+      const variantePorPeriodo = {};
+      Object.keys(periods).forEach((k) => {
+        porPeriodo[k] = { unidades: 0, facturacion: 0, pedidoIds: new Set() };
+        colorPorPeriodo[k] = new Map(); // color -> { color, unidades, facturacion }
+        tallePorPeriodo[k] = new Map(); // talle -> { talle, unidades, facturacion }
+        variantePorPeriodo[k] = new Map(); // "color / talle" -> { color, talle, variante, unidades, facturacion }
+      });
+      ventas.set(productId, {
+        alltime: { unidades: 0, facturacion: 0, pedidoIds: new Set(), ultimaVenta: null },
+        porPeriodo,
+        colorPorPeriodo,
+        tallePorPeriodo,
+        variantePorPeriodo,
+      });
+    }
+    return ventas.get(productId);
+  }
+
+  const pagados = orders.filter(itemsCuentanVenta);
+  pagados.forEach((o) => {
+    const fecha = new Date(o.created_at);
+    (o.products || []).forEach((li) => {
+      const entry = getEntry(li.product_id);
+      const unidades = Number(li.quantity || 0);
+      const facturacion = Number(li.price || 0) * unidades;
+      const meta = variantMeta.get(li.variant_id) || {};
+      const color = meta.color || null;
+      const talle = meta.talle || null;
+
+      entry.alltime.unidades += unidades;
+      entry.alltime.facturacion += facturacion;
+      entry.alltime.pedidoIds.add(o.id);
+      if (!entry.alltime.ultimaVenta || fecha > new Date(entry.alltime.ultimaVenta)) {
+        entry.alltime.ultimaVenta = o.created_at;
+      }
+
+      Object.entries(periods).forEach(([key, { desde, hasta }]) => {
+        if (fecha >= desde && fecha <= hasta) {
+          entry.porPeriodo[key].unidades += unidades;
+          entry.porPeriodo[key].facturacion += facturacion;
+          entry.porPeriodo[key].pedidoIds.add(o.id);
+
+          if (color) {
+            const cMap = entry.colorPorPeriodo[key];
+            const cPrev = cMap.get(color) || { color, unidades: 0, facturacion: 0 };
+            cPrev.unidades += unidades;
+            cPrev.facturacion += facturacion;
+            cMap.set(color, cPrev);
+          }
+          if (talle) {
+            const tMap = entry.tallePorPeriodo[key];
+            const tPrev = tMap.get(talle) || { talle, unidades: 0, facturacion: 0 };
+            tPrev.unidades += unidades;
+            tPrev.facturacion += facturacion;
+            tMap.set(talle, tPrev);
+          }
+          const vKey = `${color || "Sin color"} / ${talle || "Sin talle"}`;
+          const vMap = entry.variantePorPeriodo[key];
+          const vPrev = vMap.get(vKey) || { color: color || "Sin color", talle: talle || "Sin talle", variante: vKey, unidades: 0, facturacion: 0 };
+          vPrev.unidades += unidades;
+          vPrev.facturacion += facturacion;
+          vMap.set(vKey, vPrev);
+        }
+      });
+    });
+  });
+
+  return ventas;
+}
+
+function serializarProductos(products, ventasPorProducto, periods) {
+  return products.map((p) => {
     const nombre = p.name?.es || p.name;
     const imagen = p.images?.[0]?.src || null;
+    const categoriasArr = (p.categories || []).map((c) => c.name?.es || c.name).filter(Boolean);
+    const categoria = categoriaPrincipal(categoriasArr);
+    const categorias = categoriasArr.length ? categoriasArr : ["Sin categoría"];
+    const publicado = p.published !== false;
+    const tags = (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean);
+
     const variantes = (p.variants || []).map((v) => {
       const stock = v.stock === null || v.stock === undefined ? null : Number(v.stock);
+      const precio = Number(v.price || 0);
       return {
+        id: v.id,
         sku: v.sku || null,
+        color: v.values?.[0]?.es || null,
+        talle: v.values?.[1]?.es || null,
         variante: [v.values?.[0]?.es, v.values?.[1]?.es].filter(Boolean).join(" / ") || "Único",
         stock,
+        precio,
+        costo: v.cost != null && v.cost !== "" ? Number(v.cost) : null,
       };
     });
 
     const stockTotal = variantes.reduce((acc, v) => acc + (v.stock || 0), 0);
+    const stockValorTotal = variantes.reduce((acc, v) => acc + (v.stock || 0) * (v.precio || 0), 0);
 
-    stockPorProducto.push({
+    const colorMap = new Map();
+    variantes.forEach((v) => {
+      const color = v.color || "Único";
+      colorMap.set(color, (colorMap.get(color) || 0) + (v.stock || 0));
+    });
+    const stockPorColor = Array.from(colorMap.entries())
+      .map(([color, stock]) => ({ color, stock }))
+      .sort((a, b) => b.stock - a.stock);
+    const colorMasStock = stockPorColor.length ? stockPorColor[0] : null;
+
+    const ventas = ventasPorProducto.get(p.id);
+    const ventasTotales = ventas
+      ? {
+          unidades: ventas.alltime.unidades,
+          facturacion: ventas.alltime.facturacion,
+          pedidos: ventas.alltime.pedidoIds.size,
+          ultimaVenta: ventas.alltime.ultimaVenta,
+        }
+      : { unidades: 0, facturacion: 0, pedidos: 0, ultimaVenta: null };
+
+    const ventasPorPeriodo = {};
+    Object.keys(periods).forEach((key) => {
+      const v = ventas ? ventas.porPeriodo[key] : null;
+      const colorMap = ventas ? ventas.colorPorPeriodo[key] : new Map();
+      const talleMap = ventas ? ventas.tallePorPeriodo[key] : new Map();
+      const varianteMap = ventas ? ventas.variantePorPeriodo[key] : new Map();
+
+      const coloresVendidos = Array.from(colorMap.values()).sort((a, b) => b.unidades - a.unidades);
+      const tallesVendidos = Array.from(talleMap.values()).sort((a, b) => b.unidades - a.unidades);
+      const variantesVendidas = Array.from(varianteMap.values()).sort((a, b) => b.unidades - a.unidades);
+
+      ventasPorPeriodo[key] = {
+        unidades: v ? v.unidades : 0,
+        facturacion: v ? v.facturacion : 0,
+        pedidos: v ? v.pedidoIds.size : 0,
+        colorMasVendido: coloresVendidos.length ? coloresVendidos[0] : null,
+        talleMasVendido: tallesVendidos.length ? tallesVendidos[0] : null,
+        coloresVendidos,
+        tallesVendidos,
+        variantesVendidas,
+      };
+    });
+
+    return {
+      id: p.id,
       producto: nombre,
       imagen,
+      categoria,
+      categorias,
+      tags,
+      publicado,
+      creado: p.created_at,
       stockTotal,
+      stockValorTotal,
+      stockPorColor,
+      colorMasStock,
       variantes: variantes.sort((a, b) => (a.stock || 0) - (b.stock || 0)),
-    });
-
-    // Alerta agrupada por artículo: sumamos las unidades de las variantes
-    // con poco stock y listamos cuáles son, en vez de una fila por variante.
-    const variantesBajas = variantes.filter((v) => v.stock !== null && v.stock > 0 && v.stock <= LOW_STOCK_THRESHOLD);
-    if (variantesBajas.length > 0) {
-      ultimasUnidadesPorArticulo.push({
-        producto: nombre,
-        imagen,
-        unidadesBajas: variantesBajas.reduce((acc, v) => acc + v.stock, 0),
-        variantes: variantesBajas.map((v) => `${v.variante} (${v.stock})`).join(", "),
-      });
-    }
+      ventasTotales,
+      ventasPorPeriodo,
+    };
   });
-
-  stockPorProducto.sort((a, b) => a.stockTotal - b.stockTotal);
-  ultimasUnidadesPorArticulo.sort((a, b) => a.unidadesBajas - b.unidadesBajas);
-  return { stockPorProducto, ultimasUnidadesPorArticulo };
-}
-
-function calcularSinVentas(products, orders) {
-  const now = new Date();
-  const desdeCorte = daysAgo(SIN_VENTAS_DIAS);
-
-  // Última fecha de venta pagada por producto
-  const ultimaVenta = new Map();
-  orders
-    .filter(itemsCuentanVenta)
-    .forEach((o) => {
-      (o.products || []).forEach((li) => {
-        const fecha = new Date(o.created_at);
-        const actual = ultimaVenta.get(li.product_id);
-        if (!actual || fecha > actual) ultimaVenta.set(li.product_id, fecha);
-      });
-    });
-
-  const sinVentas = [];
-  let sinVentasCount = 0;
-
-  products.forEach((p) => {
-    const ultima = ultimaVenta.get(p.id);
-    const tieneStock = (p.variants || []).some((v) => Number(v.stock || 0) > 0);
-    if (!tieneStock) return; // no tiene sentido alertar si no hay stock
-
-    if (!ultima) {
-      sinVentasCount += 1;
-      sinVentas.push({
-        producto: p.name?.es || p.name,
-        imagen: p.images?.[0]?.src || null,
-        dias: null, // nunca vendió
-      });
-    } else if (ultima < desdeCorte) {
-      const dias = Math.floor((now - ultima) / (1000 * 60 * 60 * 24));
-      sinVentasCount += 1;
-      sinVentas.push({
-        producto: p.name?.es || p.name,
-        imagen: p.images?.[0]?.src || null,
-        dias,
-      });
-    }
-  });
-
-  sinVentas.sort((a, b) => (b.dias ?? 99999) - (a.dias ?? 99999));
-  return { sinVentasCount, sinVentasRecientes: sinVentas.slice(0, 20) };
 }
 
 // ---------- Main ----------
@@ -419,65 +473,61 @@ async function main() {
   }
 
   console.log("Trayendo pedidos de Tienda Nube...");
-  const orders = await fetchAllPages("/orders", {
-    // Traemos los últimos ~90 días de pedidos, suficiente para todos los
-    // rangos del dashboard (incluido "mes anterior").
-    created_at_min: daysAgo(95).toISOString(),
-  });
+  const orders = await fetchAllPages("/orders", { created_at_min: daysAgo(95).toISOString() });
   console.log(`Pedidos traídos: ${orders.length}`);
 
   console.log("Trayendo productos de Tienda Nube...");
   const products = await fetchAllPages("/products");
   console.log(`Productos traídos: ${products.length}`);
 
-  const { productMeta, variantMeta } = construirMetadata(products);
-
   const periods = buildPeriods();
+  const periodosDias = {};
+  Object.entries(periods).forEach(([k, v]) => (periodosDias[k] = v.dias));
+
+  const { productMeta, variantMeta } = construirMetadata(products);
+  const productTags = new Map(products.map((p) => [p.id, (p.tags || "").split(",").map((t) => t.trim()).filter(Boolean)]));
+
   const kpisPorPeriodo = {};
-  const masVendidosPorPeriodo = {};
   const porCategoriaPorPeriodo = {};
   const porTallePorPeriodo = {};
-
-  Object.entries(periods).forEach(([key, { desde, hasta, prev }]) => {
-    kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta, prev);
-    masVendidosPorPeriodo[key] = calcularMasVendidos(orders, desde, hasta);
-    porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta);
+  const porTagPorPeriodo = {};
+  Object.entries(periods).forEach(([key, { desde, hasta }]) => {
+    kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta);
+    porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta, 30);
     porTallePorPeriodo[key] = calcularPorTalle(orders, desde, hasta, variantMeta);
+    porTagPorPeriodo[key] = calcularPorTag(orders, desde, hasta, productTags);
   });
 
-  const { stockPorProducto, ultimasUnidadesPorArticulo } = calcularStockYAlertas(products);
-  const { sinVentasCount, sinVentasRecientes } = calcularSinVentas(products, orders);
-  const nuevosIngresos = calcularNuevosIngresos(products, 15);
+  const ventasPorProducto = construirVentasPorProducto(orders, periods, variantMeta);
+  const productos = serializarProductos(products, ventasPorProducto, periods);
+
+  // Por día completo (últimos 95 días) — para que el dashboard sume cualquier rango custom que elija Ariel.
+  const porDia = calcularPorDia(orders, startOfDay(daysAgo(95)), endOfDay(new Date()));
 
   const db = initFirebase();
   const payload = {
     actualizado: new Date().toISOString(),
+    periodosDias,
     kpisPorPeriodo,
-    masVendidosPorPeriodo,
     porCategoriaPorPeriodo,
     porTallePorPeriodo,
-    ultimasUnidadesPorArticulo,
-    stockPorProducto,
-    nuevosIngresos,
-    sinVentas: { total: sinVentasCount, recientes: sinVentasRecientes },
+    porTagPorPeriodo,
+    porDia,
+    productos,
   };
 
   console.log("Escribiendo en Firebase...");
   await db.ref("dashboard").set(payload);
   console.log("Listo. Dashboard actualizado.");
 
-  // IMPORTANTE: Firebase Admin (Realtime Database) mantiene una conexión
-  // abierta tipo socket para poder escuchar cambios en vivo. Sin este
-  // cierre explícito, el proceso de Node nunca termina solo, y el job
-  // de GitHub Actions queda "corriendo" para siempre aunque ya haya
-  // escrito todo correctamente.
+  // Firebase Admin (Realtime Database) mantiene una conexión abierta; sin
+  // este cierre explícito el proceso de Node nunca termina solo y el job
+  // de GitHub Actions queda "corriendo" para siempre.
   await admin.app().delete();
 }
 
 main()
-  .then(() => {
-    process.exit(0);
-  })
+  .then(() => process.exit(0))
   .catch((err) => {
     console.error("Error en sync.js:", err);
     process.exit(1);

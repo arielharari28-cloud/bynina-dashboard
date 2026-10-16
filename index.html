@@ -52,6 +52,7 @@
     <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
+    <div class="navitem" data-view="cyber">🔥 Cyber</div>
   </nav>
   <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">Datos vía Tienda Nube</div>
 </aside>
@@ -68,6 +69,7 @@
     <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
+    <div class="navitem" data-view="cyber">🔥 Cyber</div>
   </nav>
 
   <div id="loading" class="flex items-center justify-center h-48 text-slate-400 gap-3">
@@ -373,6 +375,20 @@
     </div>
 
     <!-- ===================== GANADORES ===================== -->
+    <div class="view" data-view="cyber">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🔥 Cyber</h1>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Sugerencia automática: productos con más de 45 días en la web y lentos (200+ días de stock, sin ventas, curva rota, o invierno desde 90 días). El grupo sale del costo: hasta $4.000 → $5.000, hasta $8.000 → $10.000, el resto → % OFF según el margen (nunca debajo del costo, salvo los muertos de 300+ días). Podés cambiar el grupo, quitar, cargar el costo real y sumar otros: todo queda guardado.</p>
+      <div class="flex flex-wrap gap-1.5 mb-3" id="cyberTabs"></div>
+      <div class="flex flex-wrap gap-3 items-center mb-3 text-xs text-slate-600">
+        <input id="cyberBusca" type="text" placeholder="Buscar producto o prenda…" class="border border-slate-200 rounded-full px-3 py-1.5 text-xs w-56">
+        <label class="flex items-center gap-1"><input type="checkbox" id="cyberAgrupar" checked> Agrupar por prenda</label>
+        <label class="flex items-center gap-1"><input type="checkbox" id="cyberAnuncio"> Solo para anuncio (3+ u.)</label>
+        <button id="cyberExportar" class="pill">⬇ Exportar Excel</button>
+      </div>
+      <div id="cyberAviso" class="text-xs text-amber-800 mb-3"></div>
+      <div id="cyberLista"></div>
+    </div>
+
     <div class="view" data-view="ganadores">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏅 Productos ganadores</h1>
       <p class="text-sm text-slate-500 mt-1 mb-1" id="ganadoresDesc"></p>
@@ -2082,7 +2098,7 @@
   }
 
   function renderAll() {
-    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } try{ renderClasif(); }catch(e){ console.error(e); } renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab();
+    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } try{ renderClasif(); }catch(e){ console.error(e); } renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab(); try{ renderCyber(); }catch(e){ console.error(e); }
   }
 
   // ---------------- Resumen (Web y Local separados, misma estructura en las dos) ----------------
@@ -2312,6 +2328,176 @@
     e.target.disabled = true;
     setTimeout(() => { e.target.disabled = false; }, 1200);
   });
+
+
+  // ---------------- 🔥 Cyber: selección de productos para $5.000 / $10.000 / hasta 50% OFF ----------------
+  // Sugerencia automática + ajustes a mano guardados en Firebase: dashboard_cyber/items/{productId}
+  //   { grupo: "5000"|"10000"|"50", quitado: true, costo: número, agregado: true }
+  // Costo: el cargado a mano acá > el de Tienda Nube (variante "cost") > estimado (60% del precio, margen 40%).
+  const CY_GRUPOS = [["5000", "Todo a $5.000"], ["10000", "Todo a $10.000"], ["50", "Hasta 50% OFF"]];
+  const CY_EDAD_MIN = 45;      // días desde que se creó en TN: los más nuevos todavía no entran
+  const CY_DIAS_MIN = 200;     // días de stock para considerarlo lento
+  const CY_DIAS_MUERTO = 300;  // desde acá (o sin ventas) se acepta perder un poco contra el costo
+  const CY_DIAS_INV = 90;      // invierno: entra desde menos días (ya es fuera de temporada)
+  const CY_ROTA_MAX = 4;       // curva rota: quedan pocas unidades sueltas
+  const CY_ANUNCIO_MIN = 3;    // unidades mínimas para mostrarlo en un anuncio
+  const CY_INV_RE = /buzo|campera|sweater|tejid|saco|chaleco|polar|cardigan|abrigo|invierno/i;
+  let cyItems = {}, cyTab = "5000", cyAgrupar = true, cyBusca = "", cySoloAnuncio = false;
+  db.ref("dashboard_cyber/items").on("value", s => { cyItems = s.val() || {}; if (data) renderCyber(); });
+  db.ref("dashboard_cyber/cfg").on("value", s => { const v = s.val() || {}; if (v.tab) cyTab = v.tab; if (v.agrupar != null) cyAgrupar = !!v.agrupar; if (data) renderCyber(); });
+  const cyGuardarCfg = () => db.ref("dashboard_cyber/cfg").update({ tab: cyTab, agrupar: cyAgrupar });
+  const cyPrenda = p => { const c = clDe(p); return (c && c.base) || p.categoria || "Sin categoría"; };
+  const cyPrecio = p => Math.max(0, ...(p.variantes || []).filter(v => (v.stock || 0) > 0).map(v => v.precio || 0), 0) || Math.max(0, ...(p.variantes || []).map(v => v.precio || 0), 0);
+  const cyCostoTN = p => Math.max(0, ...(p.variantes || []).map(v => Number(v.costo) || 0), 0);
+  function cyCosto(p) {
+    const m = (cyItems[p.id] || {}).costo;
+    if (m > 0) return { v: m, fuente: "manual" };
+    const tn = cyCostoTN(p);
+    if (tn > 0) return { v: tn, fuente: "tn" };
+    return { v: Math.round(cyPrecio(p) * 0.6), fuente: "estimado" };
+  }
+  // Ventas de 60 días: web + local (si hay reporte cargado, llevado a 60 días).
+  function cyVend60(p) {
+    let v = clVend(p, "60dias");
+    if (localData) { const e = localIndice().porProd.get(p.id); if (e) v += e.u * 60 / localDias(); }
+    return v;
+  }
+  function cyDias(p) { const st = p.stockTotal || 0, v = cyVend60(p); if (st <= 0) return null; return v > 0 ? st / (v / 60) : Infinity; }
+  const cyEsInvierno = p => CY_INV_RE.test(cyPrenda(p)) || (p.tags || []).some(t => /invierno/i.test(t));
+  const floor5 = n => Math.floor(n / 5) * 5;
+  // Por qué entra (o "" si no lo sugiere).
+  function cyMotivo(p) {
+    const st = p.stockTotal || 0; if (st <= 0) return "";
+    const edad = clDias(p.creado); if (edad != null && edad < CY_EDAD_MIN) return "";
+    const d = cyDias(p); if (d == null) return "";
+    if (d === Infinity) return "Sin ventas";
+    if (d >= CY_DIAS_MIN) return "~" + Math.round(d) + " días";
+    if (cyEsInvierno(p) && d >= CY_DIAS_INV) return "Invierno · ~" + Math.round(d) + " días";
+    if (st <= CY_ROTA_MAX && d >= 60) return "Curva rota";
+    return "";
+  }
+  const cyMuerto = p => { const d = cyDias(p); return d === Infinity || (d != null && d >= CY_DIAS_MUERTO); };
+  function cyGrupoAuto(p) {
+    const c = cyCosto(p).v, precio = cyPrecio(p), muerto = cyMuerto(p);
+    if (precio > 5000 * 1.2 && (c <= 4000 || (muerto && c <= 5500))) return "5000";
+    if (precio > 10000 * 1.2 && (c <= 8000 || (muerto && c <= 11000))) return "10000";
+    return "50";
+  }
+  function cyCalc(p, grupo) {
+    const precio = cyPrecio(p), c = cyCosto(p).v;
+    if (grupo === "5000" || grupo === "10000") {
+      const pc = Number(grupo); return { precio, pc, pct: precio > 0 ? Math.round((1 - pc / precio) * 100) : 0, gan: pc - c };
+    }
+    const margen = precio > 0 ? (precio - c) / precio * 100 : 0;
+    let pct = cyMuerto(p) ? floor5(margen) : floor5(margen - 10);
+    pct = Math.max(10, Math.min(50, pct));
+    const pc = Math.round(precio * (1 - pct / 100));
+    return { precio, pc, pct, gan: pc - c };
+  }
+  // Lista final: sugeridos + agregados a mano, con el grupo que manda (manual > automático).
+  function cyLista() {
+    return clProds().filter(p => (p.stockTotal || 0) > 0).map(p => {
+      const it = cyItems[p.id] || {}, motivo = cyMotivo(p);
+      if (!motivo && !it.agregado) return null;
+      const grupo = it.grupo || cyGrupoAuto(p);
+      return { p, it, motivo: motivo || "Agregado a mano", grupo, quitado: !!it.quitado, calc: cyCalc(p, grupo), costo: cyCosto(p), dias: cyDias(p), v60: cyVend60(p) };
+    }).filter(Boolean);
+  }
+  const cySet = (pid, campos) => db.ref("dashboard_cyber/items/" + pid).update(campos);
+  function cyCard(f) {
+    const { p, calc, costo } = f, st = p.stockTotal || 0, anuncio = st >= CY_ANUNCIO_MIN;
+    const ganCol = calc.gan < 0 ? "#b91c1c" : "#15803d";
+    const opts = CY_GRUPOS.map(([g, l]) => `<option value="${g}" ${g === f.grupo ? "selected" : ""}>${l}</option>`).join("");
+    return `<div class="card overflow-hidden flex flex-col ${f.quitado ? "opacity-60" : ""}">
+      <div class="relative">${p.imagen ? `<img src="${focoEsc(p.imagen)}" class="w-full h-44 object-cover" loading="lazy">` : `<div class="w-full h-44 bg-slate-100"></div>`}
+        <div class="absolute top-2 left-2 flex flex-wrap gap-1">
+          ${anuncio ? `<span class="chip chip-green">Anuncio</span>` : `<span class="chip chip-ok">Sin anuncio · ${st} u.</span>`}
+          ${cyEsInvierno(p) ? `<span class="chip chip-amber">Invierno</span>` : ""}
+        </div></div>
+      <div class="p-3 flex flex-col gap-1 text-xs flex-1">
+        <div class="font-semibold text-sm text-slate-800 leading-tight">${focoEsc(p.producto)}</div>
+        <div class="text-slate-500">${focoEsc(cyPrenda(p))} · ${fmtNum(st)} u. · ${fmtNum(f.v60)} vend. 60d</div>
+        <div class="font-semibold" style="color:#8A3B2E">${focoEsc(f.motivo)}</div>
+        <div class="flex justify-between mt-1"><span class="text-slate-500">Precio</span><span>${fmtMoney(calc.precio)}</span></div>
+        <div class="flex justify-between"><span class="text-slate-500">Cyber</span><span class="font-bold">${fmtMoney(calc.pc)} <span class="text-slate-400 font-normal">(-${calc.pct}%)</span></span></div>
+        <div class="flex justify-between items-center"><span class="text-slate-500">Costo ${costo.fuente === "estimado" ? `<span class="text-amber-700">(estimado)</span>` : costo.fuente === "tn" ? "(TN)" : "(a mano)"}</span>
+          <input type="number" data-cycosto="${p.id}" value="${costo.fuente === "manual" ? costo.v : ""}" placeholder="${fmtNum(costo.v)}" class="w-20 text-right border border-slate-200 rounded px-1 py-0.5"></div>
+        <div class="flex justify-between"><span class="text-slate-500">Gana por u.</span><span class="font-bold" style="color:${ganCol}">${fmtMoney(calc.gan)}</span></div>
+        <div class="flex gap-1 mt-2">
+          ${f.quitado
+            ? `<button data-cyrest="${p.id}" class="pill flex-1">↺ Volver a sumar</button>`
+            : `<select data-cygrupo="${p.id}" class="flex-1 border border-slate-200 rounded-full px-2 py-1 text-xs bg-white">${opts}</select>
+               <button data-cyquitar="${p.id}" class="pill" title="Quitar de la lista">✕</button>`}
+        </div>
+      </div></div>`;
+  }
+  function cyBloques(filas) {
+    const grid = arr => `<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">${arr.map(cyCard).join("")}</div>`;
+    const ord = arr => arr.sort((a, b) => (b.dias === Infinity ? 1e9 : b.dias || 0) - (a.dias === Infinity ? 1e9 : a.dias || 0) || (b.p.stockTotal || 0) - (a.p.stockTotal || 0));
+    if (!filas.length) return `<div class="text-sm text-slate-400 py-8 text-center">No hay productos acá.</div>`;
+    if (!cyAgrupar) return grid(ord(filas));
+    const m = new Map(); filas.forEach(f => { const k = cyPrenda(f.p); if (!m.has(k)) m.set(k, []); m.get(k).push(f); });
+    return [...m.entries()].sort((a, b) => b[1].length - a[1].length).map(([k, arr]) => {
+      const u = arr.reduce((s, f) => s + (f.p.stockTotal || 0), 0);
+      return `<div class="mb-6"><div class="flex items-baseline justify-between mb-2"><div class="font-bold text-slate-800">${focoEsc(k)}</div>
+        <div class="text-xs text-slate-500">${arr.length} producto${arr.length !== 1 ? "s" : ""} · ${fmtNum(u)} u.
+        ${cyTab !== "quitados" ? `<button data-cyquitarprenda="${focoEsc(k)}" class="ml-2 underline text-slate-400 hover:text-red-600">quitar todos</button>` : ""}</div></div>${grid(ord(arr))}</div>`;
+    }).join("");
+  }
+  function cyFiltrar(filas) {
+    const q = clNorm(cyBusca);
+    return filas.filter(f => (!q || clNorm(f.p.producto + " " + cyPrenda(f.p)).includes(q)) && (!cySoloAnuncio || (f.p.stockTotal || 0) >= CY_ANUNCIO_MIN));
+  }
+  function renderCyber() {
+    const cont = document.getElementById("cyberLista"); if (!cont || !data) return;
+    const lista = cyLista(), activos = lista.filter(f => !f.quitado), quitados = lista.filter(f => f.quitado);
+    const tabs = [...CY_GRUPOS.map(([g, l]) => { const a = activos.filter(f => f.grupo === g); return [g, l, a.length, a.reduce((s, f) => s + (f.p.stockTotal || 0), 0)]; }),
+      ["quitados", "Quitados", quitados.length, null], ["otros", "+ Sumar otros", null, null]];
+    document.getElementById("cyberTabs").innerHTML = tabs.map(([g, l, n, u]) =>
+      `<button class="pill ${cyTab === g ? "active" : ""}" data-cytab="${g}">${l}${n != null ? ` · ${n}` : ""}${u != null ? ` <span class="opacity-70">(${fmtNum(u)} u.)</span>` : ""}</button>`).join("");
+    const sinCosto = activos.filter(f => f.costo.fuente === "estimado").length;
+    document.getElementById("cyberAviso").innerHTML = sinCosto ? `⚠️ ${sinCosto} producto${sinCosto !== 1 ? "s" : ""} con costo estimado (60% del precio). Cargá el costo real en la tarjeta para que el grupo y la ganancia sean exactos.` : "";
+    let html;
+    if (cyTab === "otros") {
+      const ids = new Set(lista.map(f => f.p.id)), q = clNorm(cyBusca);
+      const otros = clProds().filter(p => (p.stockTotal || 0) > 0 && !ids.has(p.id) && (!q || clNorm(p.producto + " " + cyPrenda(p)).includes(q)))
+        .sort((a, b) => (cyDias(b) === Infinity ? 1e9 : cyDias(b) || 0) - (cyDias(a) === Infinity ? 1e9 : cyDias(a) || 0)).slice(0, 120);
+      html = `<p class="text-xs text-slate-500 mb-3">Productos con stock que no entraron en la sugerencia (los más lentos primero). Buscá y sumalos al grupo que quieras.</p>
+        <div class="space-y-1">${otros.map(p => { const d = cyDias(p);
+          return `<div class="card px-3 py-2 flex items-center gap-3 text-xs">${p.imagen ? `<img src="${focoEsc(p.imagen)}" class="w-10 h-10 object-cover rounded">` : ""}
+            <div class="flex-1"><div class="font-semibold text-slate-800">${focoEsc(p.producto)}</div><div class="text-slate-500">${focoEsc(cyPrenda(p))} · ${fmtNum(p.stockTotal)} u. · ${focoDiasTxt(d)}</div></div>
+            ${CY_GRUPOS.map(([g, l]) => `<button class="pill" data-cyadd="${p.id}" data-g="${g}">${l.replace("Todo a ", "").replace("Hasta ", "")}</button>`).join("")}</div>`; }).join("") || `<div class="text-sm text-slate-400 py-8 text-center">Nada para sumar.</div>`}</div>`;
+    } else {
+      html = cyBloques(cyFiltrar(cyTab === "quitados" ? quitados : activos.filter(f => f.grupo === cyTab)));
+    }
+    cont.innerHTML = html;
+    document.getElementById("cyberAgrupar").checked = cyAgrupar;
+    cont.querySelectorAll("[data-cyquitar]").forEach(b => b.onclick = () => cySet(b.dataset.cyquitar, { quitado: true }));
+    cont.querySelectorAll("[data-cyrest]").forEach(b => b.onclick = () => cySet(b.dataset.cyrest, { quitado: null }));
+    cont.querySelectorAll("[data-cygrupo]").forEach(s => s.onchange = () => cySet(s.dataset.cygrupo, { grupo: s.value }));
+    cont.querySelectorAll("[data-cycosto]").forEach(i => i.onchange = () => { const v = Number(i.value); cySet(i.dataset.cycosto, { costo: v > 0 ? v : null }); });
+    cont.querySelectorAll("[data-cyadd]").forEach(b => b.onclick = () => cySet(b.dataset.cyadd, { agregado: true, grupo: b.dataset.g, quitado: null }));
+    cont.querySelectorAll("[data-cyquitarprenda]").forEach(b => b.onclick = () => {
+      const k = b.dataset.cyquitarprenda, upd = {};
+      activos.filter(f => f.grupo === cyTab && cyPrenda(f.p) === k).forEach(f => { upd[f.p.id + "/quitado"] = true; });
+      if (Object.keys(upd).length) db.ref("dashboard_cyber/items").update(upd);
+    });
+  }
+  function cyExportar() {
+    const filas = cyLista().filter(f => !f.quitado).map(f => ({
+      Grupo: (CY_GRUPOS.find(([g]) => g === f.grupo) || [, ""])[1], Prenda: cyPrenda(f.p), Producto: f.p.producto, ID: f.p.id,
+      Stock: f.p.stockTotal || 0, "Vendidas 60d": Math.round(f.v60), "Días de stock": f.dias === Infinity ? "Sin ventas" : Math.round(f.dias || 0),
+      Costo: f.costo.v, "Costo origen": f.costo.fuente, Precio: f.calc.precio, "Precio cyber": f.calc.pc, "% OFF": f.calc.pct,
+      "Ganancia por u.": f.calc.gan, Anuncio: (f.p.stockTotal || 0) >= CY_ANUNCIO_MIN ? "Sí" : "No",
+    })).sort((a, b) => a.Grupo.localeCompare(b.Grupo) || a.Prenda.localeCompare(b.Prenda));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Cyber");
+    XLSX.writeFile(wb, `Cyber_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  }
+  document.getElementById("cyberTabs").addEventListener("click", e => { const b = e.target.closest("[data-cytab]"); if (!b) return; cyTab = b.dataset.cytab; cyGuardarCfg(); renderCyber(); });
+  document.getElementById("cyberAgrupar").addEventListener("change", e => { cyAgrupar = e.target.checked; cyGuardarCfg(); renderCyber(); });
+  document.getElementById("cyberAnuncio").addEventListener("change", e => { cySoloAnuncio = e.target.checked; renderCyber(); });
+  document.getElementById("cyberBusca").addEventListener("input", e => { cyBusca = e.target.value; renderCyber(); });
+  document.getElementById("cyberExportar").addEventListener("click", cyExportar);
 
   db.ref("dashboard").on("value", (snap) => {
     data = snap.val();
