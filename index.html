@@ -42,34 +42,27 @@
     <div class="text-lg font-bold text-slate-800 leading-tight">Dashboard</div>
   </div>
   <nav class="flex-1 py-4 px-2 space-y-0.5" id="sidebarNav">
-    <div class="navitem active" data-view="dashboard">📊 Dashboard</div>
+    <div class="navitem active" data-view="dashboard">📊 Cómo vamos</div>
     <div class="navitem" data-view="foco">🔎 Foco</div>
-    <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadge" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:auto"></span></div>
-    <div class="navitem" data-view="stock">📦 Stock general</div>
-    <div class="navitem" data-view="ultimas">⚠️ Últimas unidades</div>
-    <div class="navitem" data-view="vendidos">🏆 Productos vendidos</div>
-    <div class="navitem" data-view="nuevos">✨ Productos nuevos</div>
-    <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
-    <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
+    <div class="navitem" data-view="stock">📦 Catálogo</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
+    <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
+    <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest px-3 pt-4 pb-1">Configuración</div>
+    <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadge" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:auto"></span></div>
   </nav>
   <div class="px-4 py-3 border-t border-slate-100 text-xs text-slate-400">Datos vía Tienda Nube</div>
 </aside>
 
 <main class="flex-1 min-w-0 p-4 md:p-6 max-w-[1100px] mx-auto">
   <nav id="mobileNav" aria-label="Secciones">
-    <div class="navitem active" data-view="dashboard">📊 Dashboard</div>
+    <div class="navitem active" data-view="dashboard">📊 Cómo vamos</div>
     <div class="navitem" data-view="foco">🔎 Foco</div>
-    <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadgeM" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:4px"></span></div>
-    <div class="navitem" data-view="stock">📦 Stock general</div>
-    <div class="navitem" data-view="ultimas">⚠️ Últimas unidades</div>
-    <div class="navitem" data-view="vendidos">🏆 Productos vendidos</div>
-    <div class="navitem" data-view="nuevos">✨ Productos nuevos</div>
-    <div class="navitem" data-view="sinventas">📭 Sin ventas</div>
-    <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
+    <div class="navitem" data-view="stock">📦 Catálogo</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
+    <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
+    <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadgeM" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:4px"></span></div>
   </nav>
 
   <div id="loading" class="flex items-center justify-center h-48 text-slate-400 gap-3">
@@ -82,7 +75,7 @@
     <div class="view active" data-view="dashboard">
       <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
-          <h1 class="text-xl md:text-2xl font-bold text-slate-900">Dashboard</h1>
+          <h1 class="text-xl md:text-2xl font-bold text-slate-900">📊 Cómo vamos</h1>
           <p id="ultimaActualizacion" class="text-xs text-slate-400 mt-0.5">Cargando...</p>
         </div>
         <button id="btnActualizar" class="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2">🔄 Actualizar ahora</button>
@@ -150,10 +143,10 @@
     </div>
 
     <div class="view" data-view="stock">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📦 Stock general</h1>
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📦 Catálogo</h1>
       <p class="text-sm text-slate-500 mt-1 mb-4" id="stockCount"></p>
 
-      <input type="search" id="stockBuscar" placeholder="Buscar por nombre..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
+      <input type="search" id="stockBuscar" placeholder="Buscar por nombre o SKU..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
 
       <div class="flex flex-wrap gap-2 items-center mb-3">
         <span class="text-xs text-slate-500 font-medium">Ordenar:</span>
@@ -1854,7 +1847,7 @@
     let productos = [...(data.productos || [])];
     if (!stockOcultos) productos = productos.filter(p => p.publicado);
     if (stockCategoria) productos = productos.filter(p => productoEnCategoria(p, stockCategoria));
-    if (stockBuscar.trim()) { const q = stockBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
+    if (stockBuscar.trim()) { const q = clNorm(stockBuscar); productos = productos.filter(p => clNorm(p.producto + " " + (p.variantes || []).map(v => v.sku || "").join(" ")).includes(q)); }
     if (stockMin !== null) productos = productos.filter(p => p.stockTotal >= stockMin);
     if (stockMax !== null) productos = productos.filter(p => p.stockTotal <= stockMax);
 
@@ -1869,19 +1862,22 @@
     };
     productos.sort(sorters[stockOrden] || sorters.nombre);
 
-    document.getElementById("stockCount").textContent = `${productos.length} productos · stock actual por color y talle`;
+    document.getElementById("stockCount").textContent = `${productos.length} productos · tocá uno para ver la ficha completa (stock por color y talle, ventas, clasificación)`;
 
     document.getElementById("stockLista").innerHTML = productos.slice(0, 150).map((p, idx) => {
       const chips = p.stockPorColor.slice(0, 4).map(c => `<span class="chip ${c.stock <= 0 ? "chip-low" : "chip-ok"}">${c.color}: ${c.stock}</span>`).join(" ");
       const extra = p.stockPorColor.length > 4 ? `<span class="text-xs text-slate-400">+${p.stockPorColor.length - 4} colores</span>` : "";
       const valorLine = stockOrden === "mayorValor" ? `<div class="text-xs text-slate-500 font-semibold mt-0.5">Valor en stock: ${fmtMoney(p.stockValorTotal)}</div>` : "";
       return `
-      <div class="card p-4 flex items-center gap-4">
+      <div class="card p-4 flex items-center gap-4 cursor-pointer hover:border-indigo-300" data-prodopen="${p.id}" style="box-shadow:inset 4px 0 0 ${FL_ESTADOS[flEstado(p)].c}">
         <img src="${p.imagen || ""}" class="w-24 h-28 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
         <div class="flex-1 min-w-0">
           <div class="font-bold text-sm mb-1.5">${p.producto}</div>
           <div class="flex flex-wrap gap-1.5 items-center">${chips}${extra}</div>
-          <div class="text-xs text-indigo-500 font-semibold mt-1.5">${fmtNum(p.ventasTotales.unidades)} vendidos en total</div>
+          <div class="text-xs mt-1.5 flex flex-wrap gap-x-3 gap-y-1 items-center"><span class="chip" style="background:${FL_ESTADOS[flEstado(p)].c};color:#fff">${FL_ESTADOS[flEstado(p)].l}</span>
+            <span class="text-indigo-500 font-semibold">${fmtNum(clVend(p, "30dias"))} vend. 30 d · ${fmtNum(p.ventasTotales.unidades)} en total</span>
+            <span class="text-slate-500">${(d => d == null ? "" : d === Infinity ? "sin ventas" : "~" + Math.round(d) + " días de stock")(focoDiasStock(p))}</span>
+            ${(clDe(p) || {}).base ? `<span class="text-slate-500">${focoEsc(clDe(p).base)}${clGrupo(p) ? " · " + focoEsc(clGrupo(p)) : ""}</span>` : `<span style="color:#b45309">sin clasificar</span>`}</div>
           ${valorLine}
         </div>
         <div class="text-right flex-shrink-0">
