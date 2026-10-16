@@ -1405,6 +1405,145 @@
     cont.querySelectorAll("[data-fbf]").forEach(b => b.onclick = () => { focoBaseFiltro[b.dataset.fbf] = b.dataset.v; renderFoco(); });
   }
 
+  // ---------------- Foco en lista (oct 2026): reponer y empujar en un solo análisis ----------------
+  // Un estado por artículo, con los días de stock al ritmo de venta del período (web + local según "Ventas de"):
+  //   Sin stock · Reponer (< FL_REPONER días: lo que tarda reponer + margen) · OK · Empujar (≥ FL_EMPUJAR) ·
+  //   Clavado (≥ FL_CLAVADO o sin ventas). Lo que ingresó hace ≤ CL_NEWIN_DIAS días no se marca Empujar/Clavado.
+  // Último ingreso: Logística de Fábrica v2 (fabrica_v5/logistica/items cerrados: cortes y prendas de proveedor),
+  // cruzado por código = inicio del SKU de Tienda Nube (o nombre igual si no tiene código). Si no hay, alta en TN.
+  const FL_REPONER = 25, FL_EMPUJAR = 60, FL_CLAVADO = 200;
+  const FL_ESTADOS = {
+    sin: { l: "Sin stock", c: "#dc2626", bg: "#fef2f2" },
+    rep: { l: "Reponer", c: "#d97706", bg: "#fffbeb" },
+    ok: { l: "OK", c: "#16a34a", bg: "" },
+    nuevo: { l: "Nuevo", c: "#2563eb", bg: "" },
+    emp: { l: "Empujar", c: "#8A3B2E", bg: "#fbf3ee" },
+    clav: { l: "Clavado", c: "#581c87", bg: "#faf5ff" },
+  };
+  const FL_ORDEN_EST = ["rep", "sin", "clav", "emp", "nuevo", "ok"];
+  let focoVista = "lista", flFiltro = "todos", logiItems = null, flIngIdx = null;
+  db.ref("dashboard_foco/vista").on("value", s => { if (s.val()) focoVista = s.val(); if (data) renderFoco(); });
+  db.ref("fabrica_v5/logistica/items").on("value", s => { logiItems = s.val() || {}; flIngIdx = null; if (data) renderFoco(); }, () => { logiItems = {}; });
+  const flNum = s => String(s || "").toUpperCase().replace(/\s+/g, "");
+  // Índice productId → último ingreso { fecha (ms), u, origen: "fabrica"|"proveedor"|"tn" }
+  function flIngresos() {
+    if (flIngIdx && flIngIdx.data === data) return flIngIdx.map;
+    const prods = (data && data.productos || []).filter(p => p.id != null);
+    const porSku = prods.map(p => ({ p, skus: (p.variantes || []).map(v => flNum(v.sku)).filter(Boolean), nom: clNorm(p.producto) }));
+    const match = it => {
+      const code = flNum(it.code);
+      if (code.length >= 3) {
+        const re = new RegExp("^" + code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![0-9])");
+        const hits = porSku.filter(x => x.skus.some(s => re.test(s)));
+        if (hits.length) return hits.map(x => x.p);
+      }
+      const n = clNorm(it.name);
+      return n ? porSku.filter(x => x.nom === n).map(x => x.p) : [];
+    };
+    const map = new Map();
+    Object.values(logiItems || {}).forEach(it => {
+      if (!it || it.estado !== "cerrado" || it.sigue_a_estampado || it.sigue_a) return;
+      const f = it.fecha_control_cerrado || it.fecha_cerrado; if (!f) return;
+      const u = Object.values(it.grilla || {}).reduce((s, g) => s + (parseInt(g.contado) || 0), 0);
+      match(it).forEach(p => { const prev = map.get(p.id); if (!prev || f > prev.fecha) map.set(p.id, { fecha: f, u, origen: it.origen === "proveedor" ? "proveedor" : "fabrica" }); });
+    });
+    prods.forEach(p => { if (!map.has(p.id) && p.creado) map.set(p.id, { fecha: new Date(p.creado).getTime(), u: null, origen: "tn" }); });
+    flIngIdx = { data, map };
+    return map;
+  }
+  const flIngreso = p => flIngresos().get(p.id) || null;
+  const flDiasIng = p => { const i = flIngreso(p); return i ? Math.floor((Date.now() - i.fecha) / 86400000) : null; };
+  function flEstado(p) {
+    const st = p.stockTotal || 0; if (st <= 0) return "sin";
+    const ds = focoDiasStock(p), di = flDiasIng(p), nuevo = di != null && di <= CL_NEWIN_DIAS;
+    if (ds !== Infinity && ds < FL_REPONER) return "rep";
+    if (nuevo) return "nuevo";
+    if (ds === Infinity || ds >= FL_CLAVADO) return "clav";
+    if (ds >= FL_EMPUJAR) return "emp";
+    return "ok";
+  }
+  const flCodigo = p => { const s = (p.variantes || []).map(v => v.sku).find(Boolean); return s ? String(s).split(/[-_ /]/)[0] : ""; };
+  const flFecha = ms => { const d = new Date(ms); return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" }); };
+  const flCat = p => (clDe(p) || {}).base || p.categoria || "Sin categoría";
+  function flPeriodoTxt() {
+    const dias = focoPerDias(), hasta = data && data.actualizado ? new Date(data.actualizado) : new Date(), desde = new Date(hasta - (dias - 1) * 86400000);
+    const f = d => d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" });
+    const fl = s => s ? s.split("-").reverse().slice(0, 2).join("/") : "";
+    const canal = focoCanal === "web" ? "web" : focoCanal === "local" ? "local" : "web + local";
+    let t = `📅 Ventas ${canal} del <b>${f(desde)}</b> al <b>${f(hasta)}</b> (${dias} días)`;
+    if (focoCanal !== "web") t += localData ? ` · Local: reporte del ${fl(localData.desde)} al ${fl(localData.hasta)}, llevado a ${dias} días` : ` · <span style="color:#b45309">sin reporte del local cargado</span>`;
+    return t + ` · Stock: web`;
+  }
+  function flFila(p, topIds) {
+    const e = flEstado(p), E = FL_ESTADOS[e], ds = focoDiasStock(p), ing = flIngreso(p);
+    const vw = clVend(p), vl = focoCanal === "web" ? 0 : localVend(p), vt = focoCanal === "local" ? vl : vw + vl;
+    const ingTxt = ing ? `${flFecha(ing.fecha)}<div class="text-[10px] text-slate-400">${ing.origen === "fabrica" ? "Fábrica" : ing.origen === "proveedor" ? "Proveedor" : "Alta en TN"}${ing.u ? " · " + fmtNum(ing.u) + " u." : ""}</div>` : "—";
+    const rep = e === "rep" ? focoColoresRep(p).replace('<div class="text-slate-500">Ningún color para empujar</div>', "") : "";
+    return `<tr style="background:${E.bg};box-shadow:inset 4px 0 0 ${E.c}" class="border-b border-slate-100 align-top">
+      <td class="py-2 pl-3 pr-2"><img src="${p.imagen || ""}" class="w-11 aspect-[3/4] object-cover rounded bg-slate-100" loading="lazy" onerror="this.style.visibility='hidden'"></td>
+      <td class="py-2 pr-2"><div class="font-semibold text-slate-800 leading-tight">${focoEsc(p.producto)}${topIds.has(p.id) ? ` <span title="Top ${CL_TOP} más vendidos (30 días)">⭐</span>` : ""}</div>
+        <div class="text-[11px] text-slate-400">${focoEsc(flCodigo(p))}${clDe(p) && clDe(p).base ? "" : ` · <span style="color:#b45309">sin clasificar</span>`}</div>${rep}</td>
+      <td class="py-2 pr-2 text-right font-bold">${fmtNum(p.stockTotal || 0)}</td>
+      ${focoCanal !== "local" ? `<td class="py-2 pr-2 text-right">${fmtNum(vw)}</td>` : ""}
+      ${focoCanal !== "web" ? `<td class="py-2 pr-2 text-right">${localData ? fmtNum(Math.round(vl)) : "—"}</td>` : ""}
+      ${focoCanal === "todo" ? `<td class="py-2 pr-2 text-right font-semibold">${fmtNum(Math.round(vt))}</td>` : ""}
+      <td class="py-2 pr-2 text-right whitespace-nowrap">${ds == null ? "—" : ds === Infinity ? "sin ventas" : "~" + Math.round(ds) + " d"}</td>
+      <td class="py-2 pr-2 text-right whitespace-nowrap">${ingTxt}</td>
+      <td class="py-2 pr-3 text-right"><span class="chip" style="background:${E.c};color:#fff">${E.l}</span></td></tr>`;
+  }
+  function flTabla(ps, topIds) {
+    const th = (t, r) => `<th class="py-2 pr-2 font-semibold ${r ? "text-right" : "text-left"}">${t}</th>`;
+    return `<div class="overflow-x-auto"><table class="w-full text-xs"><thead class="text-slate-500 border-b border-slate-200"><tr>
+      <th class="py-2 pl-3 pr-2 text-left font-semibold">Foto</th>${th("Artículo")}${th("Stock", 1)}
+      ${focoCanal !== "local" ? th("Vend. web", 1) : ""}${focoCanal !== "web" ? th("Vend. local", 1) : ""}${focoCanal === "todo" ? th("Total", 1) : ""}
+      ${th("Días stock", 1)}${th("Últ. ingreso", 1)}<th class="py-2 pr-3 text-right font-semibold">Estado</th></tr></thead>
+      <tbody>${ps.map(p => flFila(p, topIds)).join("")}</tbody></table></div>`;
+  }
+  function renderFocoLista() {
+    const cont = document.getElementById("focoLista");
+    const base = clProds().filter(p => !(clDe(p) || {}).rechazado);
+    const v30 = p => (focoCanal === "local" ? 0 : clVend(p, "30dias")) + (focoCanal === "web" || !localData ? 0 : ((localIndice().porProd.get(p.id) || {}).u || 0) * 30 / localDias());
+    const topIds = new Set(base.filter(p => (p.stockTotal || 0) > 0 && v30(p) > 0).sort((a, b) => v30(b) - v30(a)).slice(0, CL_TOP).map(p => p.id));
+    let ps = base.filter(p => !focoOcultarSin || (p.stockTotal || 0) > 0);
+    const cuenta = {}; ps.forEach(p => { const e = flEstado(p); cuenta[e] = (cuenta[e] || 0) + 1; });
+    const filtros = [["todos", "Todos", ps.length], ...FL_ORDEN_EST.map(k => [k, FL_ESTADOS[k].l, cuenta[k] || 0])];
+    if (flFiltro !== "todos") ps = ps.filter(p => flEstado(p) === flFiltro);
+    const dsOrd = p => { const d = focoDiasStock(p); return d == null ? -1 : d === Infinity ? 1e9 : d; };
+    const vt = p => focoVendC(p);
+    const crit = focoModo === "ingreso" ? (a, b) => ((flIngreso(b) || {}).fecha || 0) - ((flIngreso(a) || {}).fecha || 0)
+      : focoOrden === "dias" ? (a, b) => dsOrd(b) - dsOrd(a)
+      : focoOrden === "stock" ? (a, b) => (b.stockTotal || 0) - (a.stockTotal || 0) || vt(b) - vt(a)
+      : focoOrden === "estado" ? (a, b) => FL_ORDEN_EST.indexOf(flEstado(a)) - FL_ORDEN_EST.indexOf(flEstado(b)) || vt(b) - vt(a)
+      : (a, b) => vt(b) - vt(a) || (b.stockTotal || 0) - (a.stockTotal || 0);
+    // Secciones según "Ver por"
+    let claveDe, ordenSec = null;
+    if (focoModo === "grupo") { claveDe = p => clGrupo(p) || (clDe(p) && clDe(p).base ? "Sin grupo" : "Sin clasificar"); ordenSec = [...CL_GRUPOS, "Sin grupo", "Sin clasificar"]; }
+    else if (focoModo === "tendencia") claveDe = p => { const t = clTendDe(p).filter(x => !clEsGrupo(x)); return t.length ? t : ["Sin tendencia"]; };
+    else if (focoModo === "ingreso") claveDe = p => { const i = flIngreso(p); if (!i) return "Sin fecha de ingreso"; const m = mondayOfWeek(i.fecha); return "Semana del " + m.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" }) + "|" + m.getTime(); };
+    else { claveDe = flCat; ordenSec = [...clCfg.bases, "Sin categoría"]; }
+    const secs = new Map();
+    ps.forEach(p => { [].concat(claveDe(p)).forEach(k => { if (!secs.has(k)) secs.set(k, []); secs.get(k).push(p); }); });
+    let keys = [...secs.keys()];
+    if (focoModo === "ingreso") keys.sort((a, b) => (+(b.split("|")[1]) || 0) - (+(a.split("|")[1]) || 0));
+    else if (ordenSec) keys.sort((a, b) => ((ordenSec.indexOf(a) + 1) || 999) - ((ordenSec.indexOf(b) + 1) || 999));
+    else keys.sort((a, b) => (a === "Sin tendencia") - (b === "Sin tendencia") || secs.get(b).length - secs.get(a).length);
+    const pend = clParaAsignar().length;
+    const aviso = pend ? `<button class="card p-3 w-full text-left text-sm mb-3" data-goto="clasificar" style="border-color:#fcd34d;background:#fffbeb">🏷️ <b>${pend} producto${pend > 1 ? "s" : ""} sin clasificar</b> — aparecen en "Sin clasificar". Tocá para clasificarlos.</button>` : "";
+    const bar = `<div class="text-xs text-slate-600 mb-2">${flPeriodoTxt()}</div>
+      <div class="flex flex-wrap gap-1.5 mb-4">${filtros.map(([k, l, n]) => `<button class="pill ${flFiltro === k ? "active" : ""}" data-flf="${k}" ${k !== "todos" && flFiltro !== k ? `style="border-color:${FL_ESTADOS[k].c};color:${FL_ESTADOS[k].c}"` : ""}>${l} · ${n}</button>`).join("")}</div>`;
+    const bloques = keys.map(k => {
+      const arr = secs.get(k).sort(crit), nom = k.split("|")[0];
+      const st = arr.reduce((s, p) => s + (p.stockTotal || 0), 0), vv = Math.round(arr.reduce((s, p) => s + vt(p), 0));
+      const c = {}; arr.forEach(p => { const e = flEstado(p); c[e] = (c[e] || 0) + 1; });
+      const res = ["rep", "clav", "emp"].filter(e => c[e]).map(e => `<b style="color:${FL_ESTADOS[e].c}">${c[e]} ${FL_ESTADOS[e].l.toLowerCase()}</b>`).join(" · ");
+      return `<div class="card mb-4 overflow-hidden"><div class="px-4 pt-3 pb-2 flex justify-between items-baseline flex-wrap gap-2">
+        <div class="font-bold">${focoEsc(nom.toUpperCase())}</div>
+        <div class="text-xs text-slate-500">${arr.length} artículo${arr.length !== 1 ? "s" : ""} · ${fmtNum(st)} u. · ${fmtNum(vv)} vendidas${res ? " · " + res : ""}</div></div>${flTabla(arr, topIds)}</div>`;
+    }).join("");
+    cont.innerHTML = aviso + bar + (bloques || '<div class="card p-4 text-sm text-slate-500">No hay artículos con este filtro.</div>');
+    cont.querySelectorAll("[data-flf]").forEach(b => b.onclick = () => { flFiltro = b.dataset.flf; renderFoco(); });
+  }
+
   // ---------------- Foco: 6 categorías × (6 con más stock, 6 más vendidos) ----------------
   // Las categorías elegidas se guardan en Firebase (dashboard_foco) para verlas igual en cualquier dispositivo.
   let focoCats = [], focoPeriodo = "30dias", focoAgregando = false;
@@ -1416,11 +1555,18 @@
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
     document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
-    document.getElementById("focoModoBar").innerHTML = `<span class="text-xs text-slate-500 font-medium">Ver por:</span>${FOCO_MODOS.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
+    const esLista = focoVista === "lista";
+    if (esLista && focoModo === "tn") focoModo = "grupo";
+    if (!esLista && focoModo === "ingreso") focoModo = "grupo";
+    const modos = esLista ? [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["ingreso", "Último ingreso"]] : FOCO_MODOS;
+    const ordenes = esLista ? [["estado", "Estado"], ...FOCO_ORDENES] : FOCO_ORDENES;
+    if (!esLista && focoOrden === "estado") focoOrden = "vend";
+    document.getElementById("focoModoBar").innerHTML = `<span class="w-full flex flex-wrap gap-1.5 items-center mb-1"><span class="text-xs text-slate-500 font-medium">Vista:</span>${[["lista", "☰ Lista"], ["tarjetas", "▦ Tarjetas"]].map(([k, l]) => `<button class="pill ${focoVista === k ? "active" : ""}" data-fvista="${k}">${l}</button>`).join("")}</span><span class="text-xs text-slate-500 font-medium">Ver por:</span>${modos.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
       + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "")
-      + (focoModo !== "tn" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${FOCO_ORDENES.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "")
+      + (focoModo !== "tn" && focoModo !== "ingreso" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${ordenes.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "")
       + (focoModo !== "tn" ? `<span class="w-full flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de:</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>${localBarra()}` : "");
     document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
+    document.querySelectorAll("[data-fvista]").forEach(b => b.onclick = () => { focoVista = b.dataset.fvista; db.ref("dashboard_foco/vista").set(focoVista); renderFoco(); });
     document.querySelectorAll("[data-forden]").forEach(b => b.onclick = () => { focoOrden = b.dataset.forden; db.ref("dashboard_foco/orden").set(focoOrden); renderFoco(); });
     document.querySelectorAll("[data-fcanal]").forEach(b => b.onclick = () => { focoCanal = b.dataset.fcanal; db.ref("dashboard_foco/canal").set(focoCanal); renderFoco(); });
     localBarraEventos();
@@ -1431,6 +1577,7 @@
       : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido (web, local o las dos, según "Ventas de"). Reponer mira solo la web: se vende online y queda poco cargado. El local se lleva al período como promedio diario del reporte cargado. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
     if (focoModo !== "tn") {
       document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
+      if (esLista) { document.getElementById("focoLeyenda").textContent = `Estados — Reponer: vende y le quedan menos de ${FL_REPONER} días de stock (lo que tarda reponer + margen). OK: ${FL_REPONER} a ${FL_EMPUJAR} días. Empujar: ${FL_EMPUJAR} a ${FL_CLAVADO} días. Clavado: más de ${FL_CLAVADO} días o sin ventas en el período. Nuevo: ingresó hace ${CL_NEWIN_DIAS} días o menos (no se marca Empujar ni Clavado). Días de stock = stock web ÷ venta diaria del período (web, local o las dos según "Ventas de"). Último ingreso: cierre del control en Logística de Fábrica (cortes y prendas de proveedor), cruzado por código con el inicio del SKU; si no hay, la fecha de alta en Tienda Nube. ⭐ = top ${CL_TOP} más vendidos de 30 días.`; renderFocoLista(); return; }
       renderFocoClasif(); return;
     }
     renderFocoTN();
@@ -2422,8 +2569,8 @@
   }
   // Todos los que están en juego: sugeridos + asignados a mano (sugeridos o no).
   function cyLista() {
-    return clProds().filter(p => (p.stockTotal || 0) > 0).map(p => {
-      const it = cyItems[p.id] || {}, motivo = cyMotivo(p), g = cyGrupoDe(p);
+    return (data && data.productos || []).filter(p => p.id != null).map(p => {
+      const it = cyItems[p.id] || {}, motivo = (p.publicado && (p.stockTotal || 0) > 0) ? cyMotivo(p) : "", g = cyGrupoDe(p);
       if (!motivo && !g.manual) return null;
       return { p, it, motivo, sugerido: !!motivo, grupo: g.id, manual: g.manual, quitado: !!it.quitado,
         calc: cyCalc(p, g.id), costo: cyCosto(p), dias: cyDias(p), v60: cyVend60(p) };
@@ -2520,13 +2667,22 @@
     let html;
     if (cyTab === "promos") html = renderCyPromos();
     else if (cyTab === "otros") {
-      const ids = new Set(lista.map(f => f.p.id)), q = clNorm(cyBusca);
-      const otros = clProds().filter(p => (p.stockTotal || 0) > 0 && !ids.has(p.id) && (!q || clNorm(p.producto + " " + cyPrenda(p)).includes(q)) && (!cySoloAnuncio || (p.stockTotal || 0) >= CY_ANUNCIO_MIN))
-        .sort((a, b) => (cyDias(b) === Infinity ? 1e9 : cyDias(b) || 0) - (cyDias(a) === Infinity ? 1e9 : cyDias(a) || 0)).slice(0, 150);
-      html = `<p class="text-xs text-slate-500 mb-3">Todos los productos con stock que no están en la lista (no sugeridos), los más lentos primero. Buscá y asignalos a la promo que quieras.</p>
+      // Sin búsqueda: los no sugeridos con stock web, más lentos primero. Con búsqueda: TODOS los productos de Tienda Nube
+      // (también sin stock web, despublicados o ya asignados), para que siempre se puedan encontrar y asignar.
+      const enLista = new Map(lista.map(f => [f.p.id, f])), q = clNorm(cyBusca);
+      const todos = (data && data.productos || []).filter(p => p.id != null);
+      const base = q ? todos.filter(p => clNorm(p.producto + " " + cyPrenda(p) + " " + (p.variantes || []).map(v => v.sku || "").join(" ")).includes(q))
+        : todos.filter(p => p.publicado && (p.stockTotal || 0) > 0 && !enLista.has(p.id) && (!cySoloAnuncio || (p.stockTotal || 0) >= CY_ANUNCIO_MIN));
+      const otros = base.sort((a, b) => (cyDias(b) === Infinity ? 1e9 : cyDias(b) || 0) - (cyDias(a) === Infinity ? 1e9 : cyDias(a) || 0)).slice(0, 150);
+      const estado = p => { const f = enLista.get(p.id), av = [];
+        if (!p.publicado) av.push(`<span style="color:#b91c1c">No publicado en TN</span>`);
+        if (!((p.stockTotal || 0) > 0)) av.push(`<span style="color:#b91c1c">Sin stock en la web</span>`);
+        if (f) av.push(`<span style="color:#3730a3">Ya está en: ${f.quitado ? "Quitados" : focoEsc((cyPromo(f.grupo) || {}).nombre || "Sin promo")}</span>`);
+        return av.length ? `<div class="text-[11px] mt-0.5">${av.join(" · ")}</div>` : ""; };
+      html = `<p class="text-xs text-slate-500 mb-3">${q ? "Resultados en todos los productos de Tienda Nube (incluye sin stock web, no publicados y los que ya están en una promo)." : "Productos con stock en la web que no están en la lista, los más lentos primero. Buscá por nombre o SKU para encontrar cualquier producto."}</p>
         <div class="space-y-1">${otros.map(p => `<div class="card px-3 py-2 flex items-center gap-3 text-xs">${p.imagen ? `<img src="${focoEsc(p.imagen)}" class="w-10 h-10 object-cover rounded">` : ""}
-            <div class="flex-1 min-w-0"><div class="font-semibold text-slate-800">${focoEsc(p.producto)}</div><div class="text-slate-500">${focoEsc(cyPrenda(p))} · ${fmtNum(p.stockTotal)} u. · ${fmtMoney(cyPrecio(p))} · ${focoDiasTxt(cyDias(p))}</div></div>
-            <select data-cygrupo="${p.id}" class="border border-slate-200 rounded-full px-2 py-1 text-xs bg-white"><option value="" selected>Asignar a…</option>${promos.map(([id, x]) => `<option value="${id}">${focoEsc(x.nombre)}</option>`).join("")}</select></div>`).join("") || `<div class="text-sm text-slate-400 py-8 text-center">Nada para sumar.</div>`}</div>`;
+            <div class="flex-1 min-w-0"><div class="font-semibold text-slate-800">${focoEsc(p.producto)}</div><div class="text-slate-500">${focoEsc(cyPrenda(p))} · ${fmtNum(p.stockTotal || 0)} u. web · ${fmtMoney(cyPrecio(p))} · ${focoDiasTxt(cyDias(p))}</div>${estado(p)}</div>
+            <select data-cygrupo="${p.id}" class="border border-slate-200 rounded-full px-2 py-1 text-xs bg-white"><option value="" selected>Asignar a…</option>${promos.map(([id, x]) => `<option value="${id}">${focoEsc(x.nombre)}</option>`).join("")}</select></div>`).join("") || `<div class="text-sm text-slate-400 py-8 text-center">${q ? "No hay ningún producto en Tienda Nube con ese nombre o SKU." : "Nada para sumar."}</div>`}</div>`;
     } else {
       const base = cyTab === "quitados" ? quitados : cyTab === "sinpromo" ? sinPromo : activos.filter(f => f.grupo === cyTab);
       const pr = cyPromo(cyTab);
