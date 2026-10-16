@@ -377,7 +377,7 @@
     <!-- ===================== GANADORES ===================== -->
     <div class="view" data-view="cyber">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🔥 Cyber</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4">Sugerencia automática: productos con más de 45 días en la web y lentos (200+ días de stock, sin ventas, curva rota, o invierno desde 90 días), web + local. Cada uno va a la promo de precio fijo más baja que le conviene por costo, o a la de % OFF. Podés asignar cualquier producto (sugerido o no) a la promo que quieras, cargar el costo real y crear, editar o desactivar promos en ⚙ Promos. Todo queda guardado.</p>
+      <p class="text-sm text-slate-500 mt-1 mb-4">Sugerencia automática: productos con más de 45 días en la web y lentos (200+ días de stock, sin ventas, curva rota, o invierno desde 90 días), web + local. Cada uno va a la promo de precio fijo más baja que le conviene por costo, o a la de % OFF. Lee el precio promocional de Tienda Nube y calcula el % sobre lo que se cobra hoy. Podés asignar cualquier producto (sugerido o no) a la promo que quieras, editar el precio cyber de cada uno, cargar el costo real y crear, editar o desactivar promos en ⚙ Promos. Todo queda guardado.</p>
       <div class="flex flex-wrap gap-1.5 mb-3" id="cyberTabs"></div>
       <div class="flex flex-wrap gap-3 items-center mb-3 text-xs text-slate-600" id="cyberFiltros">
         <input id="cyberBusca" type="text" placeholder="Buscar producto o prenda…" class="border border-slate-200 rounded-full px-3 py-1.5 text-xs w-56">
@@ -2360,7 +2360,13 @@
   const cyPromo = id => (cyPromos || {})[id] || null;
   const cyPromoTxt = p => p ? (p.tipo === "fijo" ? fmtMoney(p.valor) : "hasta " + p.valor + "% OFF") : "";
   const cyPrenda = p => { const c = clDe(p); return (c && c.base) || p.categoria || "Sin categoría"; };
-  const cyPrecio = p => Math.max(0, ...(p.variantes || []).filter(v => (v.stock || 0) > 0).map(v => v.precio || 0), 0) || Math.max(0, ...(p.variantes || []).map(v => v.precio || 0), 0);
+  const cyVarsCon = p => { const c = (p.variantes || []).filter(v => (v.stock || 0) > 0); return c.length ? c : (p.variantes || []); };
+  // Precio de lista (el más alto de las variantes con stock).
+  const cyPrecio = p => Math.max(0, ...cyVarsCon(p).map(v => v.precio || 0));
+  // Precio promocional de Tienda Nube (el más alto entre las variantes con promo), o null.
+  const cyPromoTN = p => { const ps = cyVarsCon(p).map(v => Number(v.promo) || 0).filter(x => x > 0); const m = ps.length ? Math.max(...ps) : 0; return m > 0 && m < cyPrecio(p) ? m : null; };
+  // Lo que se cobra hoy: el promocional si tiene, si no el de lista.
+  const cyPrecioHoy = p => cyPromoTN(p) || cyPrecio(p);
   const cyCostoTN = p => Math.max(0, ...(p.variantes || []).map(v => Number(v.costo) || 0), 0);
   function cyCosto(p) {
     const m = (cyItems[p.id] || {}).costo;
@@ -2390,7 +2396,7 @@
   const cyMuerto = p => { const d = cyDias(p); return d === Infinity || (d != null && d >= CY_DIAS_MUERTO); };
   // Sugerencia con las promos activas: el precio fijo más bajo que le conviene; si ninguno, la primera de %.
   function cyGrupoAuto(p) {
-    const c = cyCosto(p).v, precio = cyPrecio(p), muerto = cyMuerto(p), act = cyPromoLista(true);
+    const c = cyCosto(p).v, precio = cyPrecioHoy(p), muerto = cyMuerto(p), act = cyPromoLista(true);
     const fijos = act.filter(([, x]) => x.tipo === "fijo").sort((a, b) => a[1].valor - b[1].valor);
     for (const [id, x] of fijos) if (precio > x.valor * 1.2 && (c <= x.valor * 0.8 || (muerto && c <= x.valor * 1.1))) return id;
     const pct = act.find(([, x]) => x.tipo === "pct");
@@ -2401,15 +2407,18 @@
     const pr = g && cyPromo(g);
     return pr && pr.activo ? { id: g, manual: true } : { id: cyGrupoAuto(p), manual: false };
   }
+  // El % OFF se calcula sobre lo que se cobra hoy (promo de TN si tiene). Precio cyber cargado a mano manda.
   function cyCalc(p, grupo) {
-    const precio = cyPrecio(p), c = cyCosto(p).v, pr = cyPromo(grupo);
-    if (!pr) return { precio, pc: precio, pct: 0, gan: precio - c };
-    if (pr.tipo === "fijo") { const pc = Number(pr.valor) || 0; return { precio, pc, pct: precio > 0 ? Math.round((1 - pc / precio) * 100) : 0, gan: pc - c }; }
+    const lista = cyPrecio(p), promoTN = cyPromoTN(p), precio = cyPrecioHoy(p), c = cyCosto(p).v, pr = cyPromo(grupo);
+    const manual = Number((cyItems[p.id] || {}).precioCyber) || 0;
+    const res = pc => ({ lista, promoTN, precio, pc, pct: precio > 0 ? Math.round((1 - pc / precio) * 100) : 0, gan: pc - c, manual: manual > 0 });
+    if (manual > 0) return res(manual);
+    if (!pr) return res(precio);
+    if (pr.tipo === "fijo") return res(Number(pr.valor) || 0);
     const tope = Number(pr.valor) || 0, margen = precio > 0 ? (precio - c) / precio * 100 : 0;
     let pct = cyMuerto(p) ? floor5(margen) : floor5(margen - 10);
     pct = Math.max(Math.min(10, tope), Math.min(tope, pct));
-    const pc = Math.round(precio * (1 - pct / 100));
-    return { precio, pc, pct, gan: pc - c };
+    return res(Math.round(precio * (1 - pct / 100)));
   }
   // Todos los que están en juego: sugeridos + asignados a mano (sugeridos o no).
   function cyLista() {
@@ -2441,8 +2450,12 @@
         <div class="font-semibold text-sm text-slate-800 leading-tight">${focoEsc(p.producto)}</div>
         <div class="text-slate-500">${focoEsc(cyPrenda(p))} · ${fmtNum(st)} u. · ${fmtNum(f.v60)} vend. 60d</div>
         <div class="font-semibold" style="color:${f.sugerido ? "#8A3B2E" : "#64748b"}">${f.sugerido ? focoEsc(f.motivo) : "No sugerido · " + focoDiasTxt(f.dias)}</div>
-        <div class="flex justify-between mt-1"><span class="text-slate-500">Precio</span><span>${fmtMoney(calc.precio)}</span></div>
-        <div class="flex justify-between"><span class="text-slate-500">Cyber</span><span class="font-bold">${f.grupo ? `${fmtMoney(calc.pc)} <span class="text-slate-400 font-normal">(-${calc.pct}%)</span>` : "—"}</span></div>
+        <div class="flex justify-between mt-1"><span class="text-slate-500">Precio</span><span>${calc.promoTN ? `<s class="text-slate-400">${fmtMoney(calc.lista)}</s>` : fmtMoney(calc.lista)}</span></div>
+        ${calc.promoTN ? `<div class="flex justify-between"><span class="text-slate-500">Hoy en promo TN</span><span class="font-semibold" style="color:#b45309">${fmtMoney(calc.promoTN)} <span class="text-slate-400 font-normal">(-${Math.round((1 - calc.promoTN / calc.lista) * 100)}%)</span></span></div>` : ""}
+        <div class="flex justify-between items-center"><span class="text-slate-500">Cyber ${calc.manual ? "(a mano)" : ""}</span>
+          <span class="flex items-center gap-1">${f.grupo || calc.manual ? `<span class="text-slate-400">-${calc.pct}%</span>` : ""}
+          <input type="number" data-cyprecio="${p.id}" value="${calc.manual ? calc.pc : ""}" placeholder="${f.grupo ? fmtNum(calc.pc) : "—"}" class="w-20 text-right border ${calc.manual ? "border-indigo-400" : "border-slate-200"} rounded px-1 py-0.5 font-bold"></span></div>
+        ${calc.promoTN && (f.grupo || calc.manual) && calc.pc >= calc.promoTN ? `<div class="text-[11px]" style="color:#b91c1c">⚠️ No baja del precio que ya tiene en promo</div>` : ""}
         <div class="flex justify-between items-center"><span class="text-slate-500">Costo ${costo.fuente === "estimado" ? `<span class="text-amber-700">(estimado)</span>` : costo.fuente === "tn" ? "(TN)" : "(a mano)"}</span>
           <input type="number" data-cycosto="${p.id}" value="${costo.fuente === "manual" ? costo.v : ""}" placeholder="${fmtNum(costo.v)}" class="w-20 text-right border border-slate-200 rounded px-1 py-0.5"></div>
         <div class="flex justify-between"><span class="text-slate-500">Gana por u.</span><span class="font-bold" style="color:${ganCol}">${f.grupo ? fmtMoney(calc.gan) : "—"}</span></div>
@@ -2524,6 +2537,7 @@
     cont.querySelectorAll("[data-cygrupo]").forEach(s => s.onchange = () => { if (s.value) cyAsignar(s.dataset.cygrupo, s.value); });
     cont.querySelectorAll("[data-cyauto]").forEach(b => b.onclick = () => cySet(b.dataset.cyauto, { grupo: null, agregado: null }));
     cont.querySelectorAll("[data-cycosto]").forEach(i => i.onchange = () => { const v = Number(i.value); cySet(i.dataset.cycosto, { costo: v > 0 ? v : null }); });
+    cont.querySelectorAll("[data-cyprecio]").forEach(i => i.onchange = () => { const v = Number(i.value); cySet(i.dataset.cyprecio, { precioCyber: v > 0 ? v : null }); });
     cont.querySelectorAll("[data-cymoverprenda]").forEach(s => s.onchange = () => {
       const k = s.dataset.cymoverprenda, dest = s.value; if (!dest) return;
       const base = cyTab === "quitados" ? quitados : cyTab === "sinpromo" ? sinPromo : activos.filter(f => f.grupo === cyTab);
@@ -2559,7 +2573,7 @@
       Promo: (cyPromo(f.grupo) || {}).nombre || "", Prenda: cyPrenda(f.p), Producto: f.p.producto, ID: f.p.id,
       Sugerido: f.sugerido ? "Sí" : "No", "Asignado a mano": f.manual ? "Sí" : "No",
       Stock: f.p.stockTotal || 0, "Vendidas 60d": Math.round(f.v60), "Días de stock": f.dias === Infinity ? "Sin ventas" : Math.round(f.dias || 0),
-      Costo: f.costo.v, "Costo origen": f.costo.fuente, Precio: f.calc.precio, "Precio cyber": f.calc.pc, "% OFF": f.calc.pct,
+      Costo: f.costo.v, "Costo origen": f.costo.fuente, "Precio lista": f.calc.lista, "Promo TN hoy": f.calc.promoTN || "", "Precio cyber": f.calc.pc, "Precio cyber a mano": f.calc.manual ? "Sí" : "No", "% OFF sobre hoy": f.calc.pct,
       "Ganancia por u.": f.calc.gan, Anuncio: (f.p.stockTotal || 0) >= CY_ANUNCIO_MIN ? "Sí" : "No",
     })).sort((a, b) => a.Promo.localeCompare(b.Promo) || a.Prenda.localeCompare(b.Prenda));
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), "Cyber");

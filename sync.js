@@ -396,6 +396,8 @@ function serializarProductos(products, ventasPorProducto, periods) {
         variante: [v.values?.[0]?.es, v.values?.[1]?.es].filter(Boolean).join(" / ") || "Único",
         stock,
         precio,
+        // Precio promocional de Tienda Nube (null si no tiene o no es menor al precio)
+        promo: Number(v.promotional_price) > 0 && Number(v.promotional_price) < precio ? Number(v.promotional_price) : null,
         costo: v.cost != null && v.cost !== "" ? Number(v.cost) : null,
       };
     });
