@@ -1245,7 +1245,7 @@
     const todos = reponer.length && reponer.length === colores.filter(c => c.unidades > 0 || c.stock > 0).length;
     return `<div class="text-[11px] leading-snug mt-1.5 pt-1.5" style="border-top:1px solid #f3e3c3">
       ${empujar ? `<div style="color:#2D5A3A">↗ Empujá: <b>${focoEsc(empujar.color)}</b> · ${fmtNum(empujar.stock)} u.</div>` : `<div class="text-slate-500">Ningún color para empujar</div>`}
-      ${reponer.length ? `<div style="color:#b91c1c">↻ Reponer: ${todos && colores.length > 1 ? "todos" : reponer.map(focoEsc).join(", ")}</div>` : ""}</div>`;
+      ${reponer.length ? `<div style="color:#b91c1c">↻ Reponer: ${todos && colores.length > 1 ? "todos" : reponer.slice(0, 3).map(focoEsc).join(", ") + (reponer.length > 3 ? ` <span class="text-slate-500">y ${reponer.length - 3} más</span>` : "")}</div>` : ""}</div>`;
   }
 
   // Estado guardado de un producto, en el mismo formato que el borrador (para saber si hay cambios sin guardar).
