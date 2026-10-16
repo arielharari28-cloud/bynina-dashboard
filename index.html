@@ -1411,10 +1411,11 @@
     rep: { l: "Reponer", c: "#d97706", bg: "#fffbeb" },
     ok: { l: "OK", c: "#16a34a", bg: "" },
     nuevo: { l: "Nuevo", c: "#2563eb", bg: "" },
+    rein: { l: "Reingreso", c: "#0891b2", bg: "" },
     emp: { l: "Empujar", c: "#8A3B2E", bg: "#fbf3ee" },
     clav: { l: "Clavado", c: "#581c87", bg: "#faf5ff" },
   };
-  const FL_ORDEN_EST = ["rep", "sin", "clav", "emp", "nuevo", "ok"];
+  const FL_ORDEN_EST = ["rep", "sin", "clav", "emp", "nuevo", "rein", "ok"];
   let focoVista = "lista", flFiltro = "todos", logiItems = null, flIngIdx = null;
   db.ref("dashboard_foco/vista").on("value", s => { if (s.val()) focoVista = s.val(); if (data) renderFoco(); });
   db.ref("fabrica_v5/logistica/items").on("value", s => { logiItems = s.val() || {}; flIngIdx = null; if (data) renderFoco(); }, () => { logiItems = {}; });
@@ -1446,12 +1447,14 @@
     return map;
   }
   const flIngreso = p => flIngresos().get(p.id) || null;
+  // Reingreso = entró mercadería (Fábrica o proveedor) de un producto que ya estaba en la web hace más de CL_NEWIN_DIAS días.
+  const flEsReingreso = p => { const i = flIngreso(p); if (!i || i.origen === "tn" || !p.creado) return false; return (i.fecha - new Date(p.creado).getTime()) / 86400000 > CL_NEWIN_DIAS; };
   const flDiasIng = p => { const i = flIngreso(p); return i ? Math.floor((Date.now() - i.fecha) / 86400000) : null; };
   function flEstado(p) {
     const st = p.stockTotal || 0; if (st <= 0) return "sin";
     const ds = focoDiasStock(p), di = flDiasIng(p), nuevo = di != null && di <= CL_NEWIN_DIAS;
     if (ds !== Infinity && ds < FL_REPONER) return "rep";
-    if (nuevo) return "nuevo";
+    if (nuevo) return flEsReingreso(p) ? "rein" : "nuevo";
     if (ds === Infinity || ds >= FL_CLAVADO) return "clav";
     if (ds >= FL_EMPUJAR) return "emp";
     return "ok";
@@ -1571,7 +1574,7 @@
       : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido (web, local o las dos, según "Ventas de"). Reponer mira solo la web: se vende online y queda poco cargado. El local se lleva al período como promedio diario del reporte cargado. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
     if (focoModo !== "tn") {
       document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
-      if (esLista) { document.getElementById("focoLeyenda").textContent = `Estados — Reponer: vende y le quedan menos de ${FL_REPONER} días de stock (lo que tarda reponer + margen). OK: ${FL_REPONER} a ${FL_EMPUJAR} días. Empujar: ${FL_EMPUJAR} a ${FL_CLAVADO} días. Clavado: más de ${FL_CLAVADO} días o sin ventas en el período. Nuevo: ingresó hace ${CL_NEWIN_DIAS} días o menos (no se marca Empujar ni Clavado). Días de stock = stock web ÷ venta diaria del período (web, local o las dos según "Ventas de"). Último ingreso: cierre del control en Logística de Fábrica (cortes y prendas de proveedor), cruzado por código con el inicio del SKU; si no hay, la fecha de alta en Tienda Nube. ⭐ = top ${CL_TOP} más vendidos de 30 días.`; renderFocoLista(); return; }
+      if (esLista) { document.getElementById("focoLeyenda").textContent = `Estados — Reponer: vende y le quedan menos de ${FL_REPONER} días de stock (lo que tarda reponer + margen). OK: ${FL_REPONER} a ${FL_EMPUJAR} días. Empujar: ${FL_EMPUJAR} a ${FL_CLAVADO} días. Clavado: más de ${FL_CLAVADO} días o sin ventas en el período. Nuevo: ingresó hace ${CL_NEWIN_DIAS} días o menos (no se marca Empujar ni Clavado). Reingreso: igual que Nuevo, pero de un producto que ya estaba en la web (volvió a entrar mercadería). Días de stock = stock web ÷ venta diaria del período (web, local o las dos según "Ventas de"). Último ingreso: cierre del control en Logística de Fábrica (cortes y prendas de proveedor), cruzado por código con el inicio del SKU; si no hay, la fecha de alta en Tienda Nube. ⭐ = top ${CL_TOP} más vendidos de 30 días.`; renderFocoLista(); return; }
       renderFocoClasif(); return;
     }
     renderFocoTN();
@@ -1694,9 +1697,8 @@
     return [...arts].sort((a, b) => (dcV(b).facturacion || 0) - (dcV(a).facturacion || 0)).slice(0, n).map((p, i) => `
       <div class="flex items-center gap-2 py-1 cursor-pointer hover:bg-slate-50 rounded" data-prodopen="${p.id}"><span class="text-slate-400 w-4 text-xs">${i + 1}</span>
         <img src="${p.imagen || ""}" class="w-7 h-9 object-cover rounded bg-slate-100 shrink-0" loading="lazy" onerror="this.style.visibility='hidden'">
-        <span class="flex-1 truncate text-xs">${focoEsc(p.producto)}</span>
-        <span class="text-xs text-slate-500 whitespace-nowrap">${fmtNum(dcV(p).unidades)} u.</span>
-        <span class="text-[11px] whitespace-nowrap w-16 text-right" title="Stock web" style="color:${FL_ESTADOS[flEstado(p)].c}">${(p.stockTotal || 0) > 0 ? "stock " + fmtNum(p.stockTotal) : "sin stock"}</span>
+        <span class="flex-1 min-w-0"><span class="block truncate text-xs">${focoEsc(p.producto)}</span>
+          <span class="block text-[11px] text-slate-500">${fmtNum(dcV(p).unidades)} vend. · <span style="color:${FL_ESTADOS[flEstado(p)].c};font-weight:600">${(p.stockTotal || 0) > 0 ? "stock " + fmtNum(p.stockTotal) : "sin stock"}</span></span></span>
         <span class="text-xs font-bold whitespace-nowrap w-24 text-right">${fmtMoney(dcV(p).facturacion)}</span></div>`).join("");
   }
   function renderClasifDash() {
