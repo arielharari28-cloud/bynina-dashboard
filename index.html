@@ -99,7 +99,7 @@
         <div class="card p-5 border-indigo-200 bg-indigo-50"><div class="text-xs font-semibold text-indigo-500 mb-2">🏆 Categoría estrella</div><div class="text-lg font-bold text-indigo-700" id="kCategoriaTop">—</div><div class="text-xs mt-1 text-indigo-500" id="kCategoriaTopSub"></div></div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="hidden">
         <div class="card p-5">
           <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">🏆 Más vendidos</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="vendidos">Ver más →</div></div>
           <div id="miniMasVendidos" class="space-y-2 text-sm"></div>
@@ -114,7 +114,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="hidden">
         <div class="card p-5">
           <div class="font-bold text-sm mb-3">🗂️ Por categoría</div>
           <div id="miniCategorias" class="space-y-2 text-sm"></div>
@@ -1081,7 +1081,7 @@
   const CL_BASES_DEF = ["Remera", "Top", "Body", "Buzo", "Campera", "Pantalón", "Short", "Jean", "Pollera", "Vestido", "Conjunto"];
   let clItems = {}, clCfg = { bases: CL_BASES_DEF, tendencias: [] }, clTab = "asignar", clDraft = {}, clBusca = "";
   let focoModo = "grupo", focoOcultarSin = false; const focoBaseFiltro = {};
-  db.ref("dashboard_clasif/items").on("value", s => { clItems = s.val() || {}; if (data) { renderClasif(); renderFoco(); } });
+  db.ref("dashboard_clasif/items").on("value", s => { clItems = s.val() || {}; if (data) { renderClasif(); renderFoco(); try { renderClasifDash(); } catch (e) {} if (pmId != null) pmRender(); } });
   db.ref("dashboard_clasif/cfg").on("value", s => { const v = s.val() || {}; const tend = v.tendencias || [];
     const dup = tend.filter(clEsGrupo);
     if (dup.length) clLimpiarTendGrupo(dup, tend.filter(t => !clEsGrupo(t)));
@@ -1480,7 +1480,7 @@
     const vw = clVend(p), vl = focoCanal === "web" ? 0 : localVend(p), vt = focoCanal === "local" ? vl : vw + vl;
     const ingTxt = ing ? `${flFecha(ing.fecha)}<div class="text-[10px] text-slate-400">${ing.origen === "fabrica" ? "Fábrica" : ing.origen === "proveedor" ? "Proveedor" : "Alta en TN"}${ing.u ? " · " + fmtNum(ing.u) + " u." : ""}</div>` : "—";
     const rep = e === "rep" ? focoColoresRep(p).replace('<div class="text-slate-500">Ningún color para empujar</div>', "") : "";
-    return `<tr style="background:${E.bg};box-shadow:inset 4px 0 0 ${E.c}" class="border-b border-slate-100 align-top">
+    return `<tr style="background:${E.bg};box-shadow:inset 4px 0 0 ${E.c}" class="border-b border-slate-100 align-top cursor-pointer hover:brightness-95" data-prodopen="${p.id}">
       <td class="py-2 pl-3 pr-2"><img src="${p.imagen || ""}" class="w-11 aspect-[3/4] object-cover rounded bg-slate-100" loading="lazy" onerror="this.style.visibility='hidden'"></td>
       <td class="py-2 pr-2"><div class="font-semibold text-slate-800 leading-tight">${focoEsc(p.producto)}${topIds.has(p.id) ? ` <span title="Top ${CL_TOP} más vendidos (30 días)">⭐</span>` : ""}</div>
         <div class="text-[11px] text-slate-400">${focoEsc(flCodigo(p))}${clDe(p) && clDe(p).base ? "" : ` · <span style="color:#b45309">sin clasificar</span>`}</div>${rep}</td>
@@ -1699,10 +1699,11 @@
   }
   function dcTop(arts, n) {
     return [...arts].sort((a, b) => (dcV(b).facturacion || 0) - (dcV(a).facturacion || 0)).slice(0, n).map((p, i) => `
-      <div class="flex items-center gap-2 py-1"><span class="text-slate-400 w-4 text-xs">${i + 1}</span>
+      <div class="flex items-center gap-2 py-1 cursor-pointer hover:bg-slate-50 rounded" data-prodopen="${p.id}"><span class="text-slate-400 w-4 text-xs">${i + 1}</span>
         <img src="${p.imagen || ""}" class="w-7 h-9 object-cover rounded bg-slate-100 shrink-0" loading="lazy" onerror="this.style.visibility='hidden'">
         <span class="flex-1 truncate text-xs">${focoEsc(p.producto)}</span>
         <span class="text-xs text-slate-500 whitespace-nowrap">${fmtNum(dcV(p).unidades)} u.</span>
+        <span class="text-[11px] whitespace-nowrap w-16 text-right" title="Stock web" style="color:${FL_ESTADOS[flEstado(p)].c}">${(p.stockTotal || 0) > 0 ? "stock " + fmtNum(p.stockTotal) : "sin stock"}</span>
         <span class="text-xs font-bold whitespace-nowrap w-24 text-right">${fmtMoney(dcV(p).facturacion)}</span></div>`).join("");
   }
   function renderClasifDash() {
@@ -1745,7 +1746,7 @@
     const th = `<thead class="text-slate-500 text-xs border-b border-slate-200"><tr><th class="py-2 text-left font-semibold"></th><th class="py-2 text-right font-semibold">% venta</th><th class="py-2 text-right font-semibold">Facturación</th><th class="py-2 text-right font-semibold">Unidades</th><th class="py-2 text-right font-semibold">Vendieron</th></tr></thead>`;
     cont.innerHTML = `
       <div class="flex justify-between items-baseline flex-wrap gap-2 mt-8 mb-2">
-        <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Según nuestra clasificación</div>
+        <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Según nuestra clasificación <span class="normal-case font-normal">· tocá un artículo para verlo grande y clasificarlo</span></div>
         <div class="text-xs text-slate-500">Venta web${rango ? ` del ${rango}` : ""} · ${fmtMoney(tot)} en productos · ${fmtNum(totU)} u.</div></div>
       ${sinC && pct(sinC.fac) >= 5 ? `<button class="card p-3 w-full text-left text-sm mb-4" data-goto="clasificar" style="border-color:#fcd34d;background:#fffbeb">🏷️ <b>${pct(sinC.fac)}% de la venta es de productos sin clasificar</b> — mientras sea alto, este tablero no es exacto. Tocá para clasificar.</button>` : ""}
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
@@ -1763,6 +1764,89 @@
         <table class="w-full text-sm">${th}<tbody>${tends.map(filaT).join("")}</tbody></table></div>` : ""}`;
     cont.querySelectorAll("[data-dcopen]").forEach(el => el.onclick = () => { dcAbierta = dcAbierta === el.dataset.dcopen ? null : el.dataset.dcopen; renderClasifDash(); });
   }
+
+  // ---------------- Ficha de producto (modal grande) + clasificar desde ahí ----------------
+  // Se abre tocando cualquier artículo con data-prodopen="{id}" (tablero, Foco en lista).
+  let pmId = null, pmDraft = null;
+  function pmCerrar() { pmId = null; pmDraft = null; const m = document.getElementById("prodModal"); if (m) m.remove(); document.body.style.overflow = ""; }
+  function pmAbrir(id) {
+    const p = (data && data.productos || []).find(x => String(x.id) === String(id)); if (!p) return;
+    pmId = p.id; const c = clDe(p) || {};
+    pmDraft = { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: clTendDe(p).filter(t => !clEsGrupo(t)) };
+    pmRender();
+  }
+  function pmRender() {
+    const p = (data && data.productos || []).find(x => x.id === pmId); if (!p) { pmCerrar(); return; }
+    let m = document.getElementById("prodModal");
+    if (!m) { m = document.createElement("div"); m.id = "prodModal"; m.style.cssText = "position:fixed;inset:0;z-index:60;background:rgba(15,23,42,.55);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px"; document.body.appendChild(m); document.body.style.overflow = "hidden";
+      m.addEventListener("click", e => { if (e.target === m) pmCerrar(); }); }
+    const per = typeof periodoDash !== "undefined" && document.querySelector('.view.active[data-view="dashboard"]') ? periodoDash : focoPeriodo;
+    const vp = (p.ventasPorPeriodo && p.ventasPorPeriodo[per]) || { unidades: 0, facturacion: 0, variantesVendidas: [] };
+    const perL = { hoy: "hoy", ayer: "ayer", "7dias": "7 días", "15dias": "15 días", "30dias": "30 días", "45dias": "45 días", "60dias": "60 días", estemes: "este mes", mesanterior: "mes anterior" }[per] || per;
+    const c = clDe(p) || {}, clasificado = !!(c.base && !c.rechazado), e = flEstado(p), E = FL_ESTADOS[e], ds = focoDiasStock(p), ing = flIngreso(p);
+    const loc = localData ? Math.round(localVend(p)) : null;
+    // Grilla color × talle: stock y vendidas del período
+    const vars = p.variantes || [];
+    const colores = [...new Set(vars.map(v => v.color || "Único"))], talles = [...new Set(vars.map(v => v.talle || "Único"))];
+    const vend = new Map((vp.variantesVendidas || []).map(v => [(v.color || "Único") + "|" + (v.talle || "Único"), v.unidades || 0]));
+    const celda = (col, t) => { const v = vars.find(x => (x.color || "Único") === col && (x.talle || "Único") === t); if (!v) return `<td class="px-2 py-1.5 text-center text-slate-300">—</td>`;
+      const st = v.stock || 0, vv = vend.get(col + "|" + t) || 0;
+      return `<td class="px-2 py-1.5 text-center ${st <= 0 ? "bg-red-50" : st <= 3 && vv > 0 ? "bg-amber-50" : ""}"><b class="${st <= 0 ? "text-red-600" : ""}">${st}</b>${vv ? `<span class="text-slate-400 text-[11px]"> · ${vv}v</span>` : ""}</td>`; };
+    const grilla = `<table class="w-full text-xs border border-slate-200 rounded-lg overflow-hidden"><thead class="bg-slate-50 text-slate-500"><tr><th class="px-2 py-1.5 text-left">Color</th>${talles.map(t => `<th class="px-2 py-1.5 text-center">${focoEsc(t)}</th>`).join("")}<th class="px-2 py-1.5 text-right">Total</th></tr></thead>
+      <tbody>${colores.map(col => { const tot = vars.filter(v => (v.color || "Único") === col).reduce((s, v) => s + (v.stock || 0), 0);
+        return `<tr class="border-t border-slate-100"><td class="px-2 py-1.5 font-medium">${focoEsc(col)}</td>${talles.map(t => celda(col, t)).join("")}<td class="px-2 py-1.5 text-right font-bold">${tot}</td></tr>`; }).join("")}</tbody></table>`;
+    const precio = Math.max(0, ...vars.map(v => v.precio || 0)), promos = vars.map(v => Number(v.promo) || 0).filter(x => x > 0), promo = promos.length ? Math.max(...promos) : 0;
+    const chip = (on, attrs, txt) => `<button class="pill ${on ? "active" : ""}" ${attrs}>${focoEsc(txt)}</button>`;
+    const pend = !clasificado || pmDraft.base !== (c.base || "") || pmDraft.grupo !== clGrupo(p, c.grupo || "") || [...pmDraft.tendencias].sort().join("|") !== clTendDe(p).filter(t => !clEsGrupo(t)).sort().join("|");
+    const dato = (l, v) => `<div><div class="text-[11px] text-slate-500">${l}</div><div class="font-bold text-base">${v}</div></div>`;
+    m.innerHTML = `<div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden">
+      <div class="flex justify-between items-start gap-3 px-5 pt-4 pb-3 border-b border-slate-100">
+        <div class="min-w-0"><div class="font-bold text-lg leading-tight">${focoEsc(p.producto)}</div>
+          <div class="text-xs text-slate-500 mt-0.5">${focoEsc(flCodigo(p))}${p.publicado === false ? ` · <span class="text-red-600">No publicado</span>` : ""} · <span class="chip" style="background:${E.c};color:#fff">${E.l}</span></div></div>
+        <button id="pmX" class="text-2xl leading-none text-slate-400 hover:text-slate-700 px-2">×</button></div>
+      <div class="grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-5 p-5">
+        <div>${p.imagen ? `<img src="${focoEsc(p.imagen)}" class="w-full rounded-xl object-cover bg-slate-100" style="max-height:70vh">` : `<div class="w-full aspect-[3/4] rounded-xl bg-slate-100"></div>`}</div>
+        <div class="space-y-4 min-w-0">
+          <div class="grid grid-cols-3 gap-3">
+            ${dato("Stock web", fmtNum(p.stockTotal || 0) + " u.")}
+            ${dato("Vendidas web · " + perL, fmtNum(vp.unidades || 0))}
+            ${dato("Facturación · " + perL, fmtMoney(vp.facturacion || 0))}
+            ${dato("Vendidas local", loc == null ? "—" : fmtNum(loc))}
+            ${dato("Días de stock", ds == null ? "—" : ds === Infinity ? "sin ventas" : "~" + Math.round(ds))}
+            ${dato("Precio", promo && promo < precio ? `<s class="text-slate-400 text-sm font-normal">${fmtMoney(precio)}</s> ${fmtMoney(promo)}` : fmtMoney(precio))}
+          </div>
+          <div class="text-xs text-slate-500">Último ingreso: ${ing ? `<b>${flFecha(ing.fecha)}</b> · ${ing.origen === "fabrica" ? "Fábrica" : ing.origen === "proveedor" ? "Proveedor" : "Alta en TN"}${ing.u ? " · " + fmtNum(ing.u) + " u." : ""}` : "—"} · Vendidas local y días de stock según el período de Foco (${focoPerDias()} días).</div>
+          <div><div class="text-xs font-semibold text-slate-500 mb-1">Stock por color y talle <span class="font-normal text-slate-400">· "v" = vendidas ${perL}</span></div>${grilla}</div>
+          <div class="border-t border-slate-100 pt-3">
+            <div class="flex items-baseline justify-between mb-2"><div class="font-bold text-sm">Clasificación</div>
+              ${clasificado ? `<span class="chip" style="background:#EAF3DE;color:#27500A">Clasificado</span>` : c.rechazado ? `<span class="chip chip-low">Rechazado</span>` : `<span class="chip chip-amber">Sin clasificar</span>`}</div>
+            <div class="flex flex-wrap gap-1.5 items-center mb-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(pmDraft.base === b, `data-pmb="${focoEsc(b)}"`, b)).join("")}</div>
+            <div class="flex flex-wrap gap-1.5 items-center mb-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo</span>${CL_GRUPOS.map(g => chip(pmDraft.grupo === g, `data-pmg="${g}"`, g)).join("")}</div>
+            <div class="flex flex-wrap gap-1.5 items-center mb-3"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(pmDraft.tendencias.includes(t), `data-pmt="${focoEsc(t)}"`, t)).join("") || '<span class="text-xs text-slate-400">Se crean en Clasificar</span>'}</div>
+            <div class="flex flex-wrap gap-2 items-center">
+              ${pend ? `<button class="pill active" id="pmSave">${clasificado ? "Guardar cambios" : "Guardar clasificación"}</button>` : `<span class="text-xs text-slate-400">Sin cambios</span>`}
+              ${c.rechazado ? `<button class="pill" id="pmUnrej">Volver a tener en cuenta</button>` : `<button class="pill" id="pmRej" style="color:#b91c1c;border-color:#fca5a5">Rechazar · no va al foco</button>`}
+              <span id="pmMsg" class="text-xs"></span></div>
+          </div>
+        </div></div></div>`;
+    const set = fn => { fn(pmDraft); pmRender(); };
+    m.querySelector("#pmX").onclick = pmCerrar;
+    m.querySelectorAll("[data-pmb]").forEach(b => b.onclick = () => set(d => d.base = d.base === b.dataset.pmb ? "" : b.dataset.pmb));
+    m.querySelectorAll("[data-pmg]").forEach(b => b.onclick = () => set(d => d.grupo = d.grupo === b.dataset.pmg ? "" : b.dataset.pmg));
+    m.querySelectorAll("[data-pmt]").forEach(b => b.onclick = () => set(d => { const i = d.tendencias.indexOf(b.dataset.pmt); i >= 0 ? d.tendencias.splice(i, 1) : d.tendencias.push(b.dataset.pmt); }));
+    const sv = m.querySelector("#pmSave");
+    if (sv) sv.onclick = () => {
+      if (!pmDraft.base) { m.querySelector("#pmMsg").innerHTML = '<span style="color:#b91c1c">Elegí la categoría</span>'; return; }
+      const t = {}; pmDraft.tendencias.forEach(x => t[clKey(x)] = true);
+      sv.disabled = true; sv.textContent = "Guardando…";
+      db.ref("dashboard_clasif/items/" + p.id).update({ base: pmDraft.base, grupo: pmDraft.grupo || null, tendencias: Object.keys(t).length ? t : null, rechazado: null, ts: Date.now() })
+        .then(() => { delete clDraft[p.id]; pmRender(); }, err => { m.querySelector("#pmMsg").innerHTML = `<span style="color:#b91c1c">No se pudo guardar: ${focoEsc(err && err.message || err)}</span>`; });
+    };
+    const rj = m.querySelector("#pmRej"); if (rj) rj.onclick = () => db.ref("dashboard_clasif/items/" + p.id).update({ rechazado: true, ts: Date.now() }).then(pmRender);
+    const ur = m.querySelector("#pmUnrej"); if (ur) ur.onclick = () => db.ref("dashboard_clasif/items/" + p.id + "/rechazado").remove().then(pmRender);
+  }
+  document.addEventListener("click", e => { const el = e.target.closest("[data-prodopen]"); if (el && !e.target.closest("select,input,button")) pmAbrir(el.dataset.prodopen); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && pmId != null) pmCerrar(); });
 
   // ---------------- Stock general ----------------
   function renderStock() {
