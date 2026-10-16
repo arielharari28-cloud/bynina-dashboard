@@ -128,6 +128,7 @@
           <div id="miniTags" class="space-y-2 text-sm"></div>
         </div>
       </div>
+      <div id="dashClasif"></div>
     </div>
 
     <!-- ===================== STOCK GENERAL ===================== -->
@@ -1678,6 +1679,89 @@
     const tags = (data.porTagPorPeriodo || {})[periodoDash] || [];
     document.getElementById("miniTags").innerHTML = tags.slice(0, 6).map((t, i) => `
       <div class="flex justify-between gap-2"><span class="text-slate-400 w-4">${i + 1}</span><span class="flex-1 truncate">${t.tag}</span><span class="font-bold text-indigo-600">${fmtNum(t.unidades)} u.</span></div>`).join("") || '<div class="text-slate-400 text-sm">Sin tags cargados en los productos.</div>';
+    try { renderClasifDash(); } catch (e) { console.error(e); }
+  }
+
+  // ---------------- Dashboard según nuestra clasificación (oct 2026) ----------------
+  // Venta web de Tienda Nube (ventasPorPeriodo del período elegido arriba), agrupada con dashboard_clasif:
+  // grupo (New In / Colección / Básicos / Sale), categoría base y tendencias. "Más vendidos" no es grupo: se muestra
+  // como concentración (cuánto hace el top 20). El grupo es el de hoy (un New In de hace 40 días cuenta como Colección).
+  const DC_COLORES = { "New In": "#2563eb", "Colección": "#16a34a", "Básicos": "#64748b", "Sale": "#dc2626", "Sin grupo": "#a8a29e", "Sin clasificar": "#f59e0b" };
+  let dcAbierta = null;
+  const dcV = p => (p.ventasPorPeriodo && p.ventasPorPeriodo[periodoDash]) || { unidades: 0, facturacion: 0 };
+  function dcAgrupar(prods, claveDe) {
+    const m = new Map();
+    prods.forEach(p => { const v = dcV(p); [].concat(claveDe(p)).forEach(k => {
+      const e = m.get(k) || { k, fac: 0, u: 0, arts: [], conStock: 0 };
+      e.fac += v.facturacion || 0; e.u += v.unidades || 0; if ((v.unidades || 0) > 0) e.arts.push(p); if ((p.stockTotal || 0) > 0) e.conStock++;
+      m.set(k, e); }); });
+    return [...m.values()];
+  }
+  function dcTop(arts, n) {
+    return [...arts].sort((a, b) => (dcV(b).facturacion || 0) - (dcV(a).facturacion || 0)).slice(0, n).map((p, i) => `
+      <div class="flex items-center gap-2 py-1"><span class="text-slate-400 w-4 text-xs">${i + 1}</span>
+        <img src="${p.imagen || ""}" class="w-7 h-9 object-cover rounded bg-slate-100 shrink-0" loading="lazy" onerror="this.style.visibility='hidden'">
+        <span class="flex-1 truncate text-xs">${focoEsc(p.producto)}</span>
+        <span class="text-xs text-slate-500 whitespace-nowrap">${fmtNum(dcV(p).unidades)} u.</span>
+        <span class="text-xs font-bold whitespace-nowrap w-24 text-right">${fmtMoney(dcV(p).facturacion)}</span></div>`).join("");
+  }
+  function renderClasifDash() {
+    const cont = document.getElementById("dashClasif"); if (!cont || !data) return;
+    const prods = (data.productos || []).filter(p => p.id != null);
+    const tot = prods.reduce((s, p) => s + (dcV(p).facturacion || 0), 0), totU = prods.reduce((s, p) => s + (dcV(p).unidades || 0), 0);
+    if (!tot) { cont.innerHTML = ""; return; }
+    const pct = x => tot ? Math.round(x / tot * 1000) / 10 : 0;
+    const clasif = p => { const c = clDe(p); return c && c.base && !c.rechazado ? c : null; };
+    const kpis = (data.kpisPorPeriodo || {})[periodoDash] || {};
+    const fd = s => { const [a, m, d] = String(s || "").split("-"); return d ? `${+d}/${+m}` : ""; };
+    const rango = kpis.actualDesde ? `${fd(kpis.actualDesde)} al ${fd(kpis.actualHasta)}` : "";
+    // Grupos (excluyentes, suman 100%)
+    const grupos = dcAgrupar(prods, p => { const c = clasif(p); return !c ? "Sin clasificar" : (clGrupo(p) || "Sin grupo"); });
+    const ordenG = [...CL_GRUPOS, "Sin grupo", "Sin clasificar"];
+    grupos.sort((a, b) => ordenG.indexOf(a.k) - ordenG.indexOf(b.k));
+    const gVis = grupos.filter(g => g.fac > 0 || g.k !== "Sin grupo");
+    const barra = `<div class="flex h-7 rounded-lg overflow-hidden mb-3">${gVis.filter(g => g.fac > 0).map(g => `<div title="${focoEsc(g.k)} · ${pct(g.fac)}%" style="width:${pct(g.fac)}%;background:${DC_COLORES[g.k] || "#999"}" class="text-[11px] text-white font-semibold flex items-center justify-center overflow-hidden whitespace-nowrap">${pct(g.fac) >= 7 ? pct(g.fac) + "%" : ""}</div>`).join("")}</div>`;
+    const filaG = g => `<tr class="border-b border-slate-100 cursor-pointer hover:bg-slate-50" data-dcopen="g:${focoEsc(g.k)}">
+      <td class="py-2"><span class="inline-block w-2.5 h-2.5 rounded-full mr-2" style="background:${DC_COLORES[g.k] || "#999"}"></span>${focoEsc(g.k)}</td>
+      <td class="py-2 text-right font-bold">${pct(g.fac)}%</td><td class="py-2 text-right">${fmtMoney(g.fac)}</td><td class="py-2 text-right">${fmtNum(g.u)}</td>
+      <td class="py-2 text-right text-slate-500">${g.arts.length} de ${g.conStock}</td></tr>
+      ${dcAbierta === "g:" + g.k ? `<tr><td colspan="5" class="pb-3 px-2">${dcTop(g.arts, 10) || '<div class="text-xs text-slate-400">Sin ventas.</div>'}</td></tr>` : ""}`;
+    const sinC = grupos.find(g => g.k === "Sin clasificar");
+    // Concentración: top 20 del período
+    const ranking = [...prods].filter(p => dcV(p).facturacion > 0).sort((a, b) => dcV(b).facturacion - dcV(a).facturacion);
+    const top20 = ranking.slice(0, 20).reduce((s, p) => s + dcV(p).facturacion, 0), top5 = ranking.slice(0, 5).reduce((s, p) => s + dcV(p).facturacion, 0);
+    // Categorías (nuestra base) con su top 5
+    const cats = dcAgrupar(prods, p => { const c = clasif(p); return c ? c.base : "Sin clasificar"; }).filter(c => c.fac > 0).sort((a, b) => b.fac - a.fac);
+    const catCard = c => `<div class="card p-4"><div class="flex justify-between items-baseline mb-1"><div class="font-bold text-sm">${focoEsc(c.k)}</div>
+      <div class="text-xs"><b>${pct(c.fac)}%</b> <span class="text-slate-500">· ${fmtMoney(c.fac)} · ${fmtNum(c.u)} u.</span></div></div>
+      <div class="h-1.5 bg-slate-100 rounded mb-2"><div class="h-1.5 rounded" style="width:${Math.min(100, pct(c.fac) / (pct(cats[0].fac) || 1) * 100)}%;background:#4f46e5"></div></div>
+      ${dcTop(c.arts, dcAbierta === "c:" + c.k ? 15 : 5)}
+      ${c.arts.length > 5 ? `<button class="text-xs text-indigo-600 font-semibold mt-1" data-dcopen="c:${focoEsc(c.k)}">${dcAbierta === "c:" + c.k ? "Ver menos" : `Ver ${Math.min(15, c.arts.length)} →`}</button>` : ""}</div>`;
+    // Tendencias (no excluyentes: un artículo puede tener varias)
+    const tends = dcAgrupar(prods.filter(clasif), p => clTendDe(p).filter(t => !clEsGrupo(t))).filter(t => t.fac > 0).sort((a, b) => b.fac - a.fac);
+    const filaT = t => `<tr class="border-b border-slate-100 cursor-pointer hover:bg-slate-50" data-dcopen="t:${focoEsc(t.k)}">
+      <td class="py-2">${focoEsc(t.k)}</td><td class="py-2 text-right font-bold">${pct(t.fac)}%</td><td class="py-2 text-right">${fmtMoney(t.fac)}</td><td class="py-2 text-right">${fmtNum(t.u)}</td><td class="py-2 text-right text-slate-500">${t.arts.length} art.</td></tr>
+      ${dcAbierta === "t:" + t.k ? `<tr><td colspan="5" class="pb-3 px-2">${dcTop(t.arts, 10)}</td></tr>` : ""}`;
+    const th = `<thead class="text-slate-500 text-xs border-b border-slate-200"><tr><th class="py-2 text-left font-semibold"></th><th class="py-2 text-right font-semibold">% venta</th><th class="py-2 text-right font-semibold">Facturación</th><th class="py-2 text-right font-semibold">Unidades</th><th class="py-2 text-right font-semibold">Vendieron</th></tr></thead>`;
+    cont.innerHTML = `
+      <div class="flex justify-between items-baseline flex-wrap gap-2 mt-8 mb-2">
+        <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide">Según nuestra clasificación</div>
+        <div class="text-xs text-slate-500">Venta web${rango ? ` del ${rango}` : ""} · ${fmtMoney(tot)} en productos · ${fmtNum(totU)} u.</div></div>
+      ${sinC && pct(sinC.fac) >= 5 ? `<button class="card p-3 w-full text-left text-sm mb-4" data-goto="clasificar" style="border-color:#fcd34d;background:#fffbeb">🏷️ <b>${pct(sinC.fac)}% de la venta es de productos sin clasificar</b> — mientras sea alto, este tablero no es exacto. Tocá para clasificar.</button>` : ""}
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div class="card p-5 lg:col-span-2"><div class="font-bold text-sm mb-3">Venta por grupo</div>${barra}
+          <table class="w-full text-sm">${th}<tbody>${gVis.map(filaG).join("")}</tbody></table>
+          <p class="text-[11px] text-slate-400 mt-2">"Vendieron" = artículos con al menos una venta, de los que tienen stock. Tocá un grupo para ver sus más vendidos. El grupo es el de hoy (New In pasa a Colección a los ${CL_NEWIN_DIAS} días).</p></div>
+        <div class="card p-5"><div class="font-bold text-sm mb-3">Concentración</div>
+          <div class="text-3xl font-bold">${pct(top20)}%</div><div class="text-xs text-slate-500 mb-3">de la venta la hacen los 20 más vendidos (de ${fmtNum(ranking.length)} artículos que vendieron)</div>
+          <div class="text-xl font-bold">${pct(top5)}%</div><div class="text-xs text-slate-500 mb-3">la hacen los 5 primeros</div>
+          ${dcTop(ranking, 5)}</div>
+      </div>
+      <div class="font-bold text-sm mb-2 mt-2">Por categoría · los más vendidos de cada una</div>
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">${cats.map(catCard).join("")}</div>
+      ${tends.length ? `<div class="card p-5"><div class="font-bold text-sm mb-1">Por tendencia</div><p class="text-[11px] text-slate-400 mb-2">Un artículo puede tener varias tendencias, así que estos % no suman 100.</p>
+        <table class="w-full text-sm">${th}<tbody>${tends.map(filaT).join("")}</tbody></table></div>` : ""}`;
+    cont.querySelectorAll("[data-dcopen]").forEach(el => el.onclick = () => { dcAbierta = dcAbierta === el.dataset.dcopen ? null : el.dataset.dcopen; renderClasifDash(); });
   }
 
   // ---------------- Stock general ----------------
@@ -2745,7 +2829,8 @@
   db.ref("dashboard").on("value", (snap) => {
     data = snap.val();
     if (!data) return;
-    document.getElementById("ultimaActualizacion").textContent = "Actualizado: " + new Date(data.actualizado).toLocaleString("es-AR");
+    { const hs = (Date.now() - new Date(data.actualizado).getTime()) / 3600000, el = document.getElementById("ultimaActualizacion");
+      el.innerHTML = "Actualizado: " + new Date(data.actualizado).toLocaleString("es-AR") + (hs >= 2 ? ` <span style="color:#b45309;font-weight:600">· ⚠️ hace ${Math.floor(hs)} h — el sync de GitHub puede estar demorado o fallando</span>` : ""); }
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
     renderAll();
