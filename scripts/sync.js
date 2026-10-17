@@ -121,18 +121,48 @@ function buildPeriods() {
   const firstOfLastMonth = argMidnight(y, m - 1, 1); // Date.UTC normaliza mes negativo
   const lastOfLastMonth = new Date(firstOfThisMonth.getTime() - 1);
 
+  const DIA = 24 * 60 * 60 * 1000;
+  const firstOfPrevPrevMonth = argMidnight(y, m - 2, 1);
+  const diasMesAnterior = Math.round((firstOfThisMonth - firstOfLastMonth) / DIA);
+
+  // "N días" = los últimos N días CERRADOS (hasta ayer). Antes incluía hoy, que a la mañana
+  // está casi vacío, y se comparaba contra N días completos → la comparación salía siempre en rojo.
+  function ultimosN(n) {
+    const desde = new Date(today.getTime() - n * DIA);
+    return {
+      desde, hasta: yesterdayEnd, dias: n,
+      anterior: { desde: new Date(desde.getTime() - n * DIA), hasta: new Date(desde.getTime() - 1) },
+    };
+  }
+
+  // "Este mes" se compara contra los mismos días (y la misma hora) del mes anterior: mes a mes.
+  const mismoMomentoMesAnterior = new Date(Math.min(
+    argMidnight(y, m - 1, d).getTime() + (now.getTime() - today.getTime()),
+    lastOfLastMonth.getTime()
+  ));
+
   return {
-    hoy: { desde: today, hasta: endOfDay(now), dias: 1 },
-    ayer: { desde: yesterdayStart, hasta: yesterdayEnd, dias: 1 },
-    "7dias": { desde: startOfDay(daysAgo(7)), hasta: endOfDay(now), dias: 7 },
-    "15dias": { desde: startOfDay(daysAgo(15)), hasta: endOfDay(now), dias: 15 },
-    "30dias": { desde: startOfDay(daysAgo(30)), hasta: endOfDay(now), dias: 30 },
-    // 45 y 60 días: para la sección Foco (los pedidos se traen de los últimos 95 días, alcanza)
-    "45dias": { desde: startOfDay(daysAgo(45)), hasta: endOfDay(now), dias: 45 },
-    "60dias": { desde: startOfDay(daysAgo(60)), hasta: endOfDay(now), dias: 60 },
-    estemes: { desde: firstOfThisMonth, hasta: endOfDay(now), dias: d },
-    mesanterior: { desde: firstOfLastMonth, hasta: lastOfLastMonth, dias: 30 },
+    hoy: { desde: today, hasta: now, dias: 1,
+      anterior: { desde: yesterdayStart, hasta: new Date(now.getTime() - DIA) } }, // ayer hasta la misma hora
+    ayer: { desde: yesterdayStart, hasta: yesterdayEnd, dias: 1,
+      anterior: { desde: new Date(yesterdayStart.getTime() - DIA), hasta: new Date(yesterdayStart.getTime() - 1) } },
+    "7dias": ultimosN(7),
+    "15dias": ultimosN(15),
+    "30dias": ultimosN(30),
+    // 45 y 60 días: para la sección Foco (los pedidos se traen de los últimos 125 días, alcanza para comparar)
+    "45dias": ultimosN(45),
+    "60dias": ultimosN(60),
+    estemes: { desde: firstOfThisMonth, hasta: now, dias: d,
+      anterior: { desde: firstOfLastMonth, hasta: mismoMomentoMesAnterior } },
+    mesanterior: { desde: firstOfLastMonth, hasta: lastOfLastMonth, dias: diasMesAnterior,
+      anterior: { desde: firstOfPrevPrevMonth, hasta: new Date(firstOfLastMonth.getTime() - 1) } },
   };
+}
+
+// Fecha Argentina "AAAA-MM-DD" (para mostrar en el dashboard qué se compara contra qué).
+function fechaAR(date) {
+  const { y, m, d } = argWallClockParts(date);
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
 function previousRange(desde, hasta) {
@@ -153,7 +183,8 @@ function pedidoCuenta(order) { return !ESTADOS_CANCELADOS.has(order.status); }
 function itemsCuentanVenta(order) { return ESTADOS_VALIDOS.has(order.payment_status); }
 
 // ---------- KPIs agregados (para las tarjetas del dashboard) ----------
-function calcularKpisPeriodo(orders, desde, hasta) {
+function calcularKpisPeriodo(orders, periodo) {
+  const { desde, hasta } = periodo;
   const enRango = orders.filter((o) => inRange(o.created_at, desde, hasta) && pedidoCuenta(o));
   const pagados = enRango.filter(itemsCuentanVenta);
 
@@ -168,7 +199,7 @@ function calcularKpisPeriodo(orders, desde, hasta) {
     });
   });
 
-  const prev = previousRange(desde, hasta);
+  const prev = periodo.anterior || previousRange(desde, hasta);
   const enRangoPrev = orders.filter((o) => inRange(o.created_at, prev.desde, prev.hasta) && pedidoCuenta(o));
   const pagadosPrev = enRangoPrev.filter(itemsCuentanVenta);
   let facturacionAnterior = 0;
@@ -184,6 +215,10 @@ function calcularKpisPeriodo(orders, desde, hasta) {
     facturacionTotal,
     facturacionAnterior,
     ticketPromedio: pagados.length > 0 ? facturacionTotal / pagados.length : 0,
+    actualDesde: fechaAR(desde),
+    actualHasta: fechaAR(hasta),
+    anteriorDesde: fechaAR(prev.desde),
+    anteriorHasta: fechaAR(prev.hasta),
   };
 }
 
@@ -200,6 +235,26 @@ function calcularPorDia(orders, desde, hasta) {
       prev.facturacion += Number(li.price || 0) * Number(li.quantity || 0);
     });
     acc[key] = prev;
+  });
+  return acc;
+}
+
+// Ventas por día y por producto (fecha Argentina) → { "AAAA-MM-DD": { <productId>: { u, f } } }.
+// Sirve para ver qué se vendió en un día puntual (ej. los picos de venta).
+function calcularPorDiaProducto(orders, desde, hasta) {
+  const pagados = orders.filter((o) => inRange(o.created_at, desde, hasta) && itemsCuentanVenta(o));
+  const acc = {};
+  pagados.forEach((o) => {
+    const key = fechaAR(new Date(o.created_at));
+    const dia = acc[key] || (acc[key] = {});
+    (o.products || []).forEach((li) => {
+      if (li.product_id == null) return;
+      const u = Number(li.quantity || 0);
+      const prev = dia[li.product_id] || { u: 0, f: 0 };
+      prev.u += u;
+      prev.f += Number(li.price || 0) * u;
+      dia[li.product_id] = prev;
+    });
   });
   return acc;
 }
@@ -396,6 +451,9 @@ function serializarProductos(products, ventasPorProducto, periods) {
         variante: [v.values?.[0]?.es, v.values?.[1]?.es].filter(Boolean).join(" / ") || "Único",
         stock,
         precio,
+        // Precio promocional de Tienda Nube (null si no tiene o no es menor al precio)
+        promo: Number(v.promotional_price) > 0 && Number(v.promotional_price) < precio ? Number(v.promotional_price) : null,
+        costo: v.cost != null && v.cost !== "" ? Number(v.cost) : null,
       };
     });
 
@@ -472,7 +530,8 @@ async function main() {
   }
 
   console.log("Trayendo pedidos de Tienda Nube...");
-  const orders = await fetchAllPages("/orders", { created_at_min: daysAgo(95).toISOString() });
+  // 125 días: 60 días + los 60 anteriores para comparar, con margen.
+  const orders = await fetchAllPages("/orders", { created_at_min: daysAgo(125).toISOString() });
   console.log(`Pedidos traídos: ${orders.length}`);
 
   console.log("Trayendo productos de Tienda Nube...");
@@ -491,7 +550,7 @@ async function main() {
   const porTallePorPeriodo = {};
   const porTagPorPeriodo = {};
   Object.entries(periods).forEach(([key, { desde, hasta }]) => {
-    kpisPorPeriodo[key] = calcularKpisPeriodo(orders, desde, hasta);
+    kpisPorPeriodo[key] = calcularKpisPeriodo(orders, periods[key]);
     porCategoriaPorPeriodo[key] = calcularPorCategoria(orders, desde, hasta, productMeta, 30);
     porTallePorPeriodo[key] = calcularPorTalle(orders, desde, hasta, variantMeta);
     porTagPorPeriodo[key] = calcularPorTag(orders, desde, hasta, productTags);
@@ -502,6 +561,7 @@ async function main() {
 
   // Por día completo (últimos 95 días) — para que el dashboard sume cualquier rango custom que elija Ariel.
   const porDia = calcularPorDia(orders, startOfDay(daysAgo(95)), endOfDay(new Date()));
+  const porDiaProducto = calcularPorDiaProducto(orders, startOfDay(daysAgo(95)), endOfDay(new Date()));
 
   const db = initFirebase();
   const payload = {
@@ -517,6 +577,8 @@ async function main() {
 
   console.log("Escribiendo en Firebase...");
   await db.ref("dashboard").set(payload);
+  // Ventas por día y producto en un nodo aparte, para no hacer más pesada la carga del dashboard.
+  await db.ref("dashboard_dias_producto").set(porDiaProducto);
   console.log("Listo. Dashboard actualizado.");
 
   // Firebase Admin (Realtime Database) mantiene una conexión abierta; sin
