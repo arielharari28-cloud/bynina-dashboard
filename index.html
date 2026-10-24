@@ -345,8 +345,9 @@
 
         <div class="border-t border-slate-100 pt-4">
           <div class="font-bold text-sm mb-1">📄 Subir Excel de Ninox</div>
-          <p class="text-xs text-slate-500 mb-3">Filtrá ese período en Ninox antes de exportar (una semana). Categoriza cada artículo por palabra clave en la Descripción.</p>
-          <input type="file" id="objetivosExcelInput" accept=".xlsx,.xls" class="text-sm mb-2" />
+          <p class="text-xs text-slate-500 mb-1">Es la misma carga que usa el Foco: se sube una vez y alimenta las dos pantallas. Una semana se guarda en la semana de su lunes; un período más largo, con su fecha "hasta". Las ventas web salen solas de Tienda Nube.</p>
+          <div id="objLcPanel"></div>
+          <input type="file" id="objetivosExcelInput" class="hidden" />
           <div id="objetivosExcelPreview" class="hidden mt-3"></div>
         </div>
 
@@ -883,7 +884,7 @@
 
   db.ref("dashboard_objetivos/local").on("value", snap => {
     objetivosLocal = snap.val() || {};
-    if (data) renderObjetivos();
+    if (data) { renderObjetivos(); try { lcRenderObj(); } catch (e) {} }
     if (document.getElementById("objetivosSemanaCarga")) renderSemanaCargaEstado();
   });
 
@@ -1140,18 +1141,54 @@
   // ---- Ventas del local (reporte "Artículos más vendidos" del sistema del local, subido a mano) ----
   // dashboard_local = { desde, hasta, cargado, items: [{ k: código, d: descripción, u: unidades, c: [[color, u], ...] }] }
   // dashboard_local_map = { <código saneado>: productId | "x" (ignorar) } — cruces asignados a mano.
+  // Carga unificada del local (oct 2026): dashboard_local_cargas/{desde_hasta} = { desde, hasta, cargado, archivos, tipos,
+  //   items: [{ k, d, u, f: $ vendidos, c: [[color, u], ...] }] }. Sirve para Foco y para Objetivos.
+  // dashboard_local_costos/{código} = { cu: costo unitario, d: descripción, fecha } (del reporte "Ganancia por Artículos").
+  // dashboard_local (una sola carga, formato viejo) se sigue leyendo si todavía no hay cargas nuevas.
   let localData = null, localMap = {}, focoCanal = "todo", localIdx = null, localPanel = false;
+  let localCargas = {}, localLegacy = null, localCostos = {}, localDataKey = "";
   const FOCO_CANALES = [["web", "Web"], ["local", "Local"], ["todo", "Todo"]];
-  db.ref("dashboard_local").on("value", s => { localData = s.val(); localIdx = null; if (data) renderFoco(); });
+  db.ref("dashboard_local").on("value", s => { localLegacy = s.val(); localRecalc(true); if (data) renderFoco(); });
+  db.ref("dashboard_local_cargas").on("value", s => { localCargas = s.val() || {}; localRecalc(true); if (data) renderFoco(); try { lcRenderObj(); } catch (e) {} });
+  db.ref("dashboard_local_costos").on("value", s => { localCostos = s.val() || {}; localIdx = null; if (data) renderFoco(); });
+  const lcDiasRango = (d, h) => Math.max(1, Math.round((new Date(h) - new Date(d)) / 86400000) + 1);
+  function lcListaCargas() {
+    const arr = Object.entries(localCargas || {}).map(([id, c]) => ({ id, ...c })).filter(c => c && c.desde && c.hasta && c.items);
+    if (!arr.length && localLegacy && localLegacy.desde && localLegacy.items) arr.push({ id: "legacy", ...localLegacy });
+    return arr.sort((a, b) => a.hasta < b.hasta ? 1 : a.hasta > b.hasta ? -1 : lcDiasRango(b.desde, b.hasta) - lcDiasRango(a.desde, a.hasta));
+  }
+  // Arma el "local" del período elegido: suma las cargas que entran enteras en los últimos N días (sin superponerse).
+  // Si no entra ninguna, usa la última carga y la lleva al período por promedio diario (como antes).
+  function localRecalc(forzar) {
+    const cargas = lcListaCargas(), per = (typeof focoPerDias === "function" && data) ? focoPerDias() : 30;
+    const key = per + "|" + cargas.map(c => c.id + c.cargado).join(",");
+    if (!forzar && key === localDataKey) return;
+    localDataKey = key; localIdx = null;
+    if (!cargas.length) { localData = null; return; }
+    const fin = cargas[0].hasta, ini = new Date(new Date(fin) - (per - 1) * 86400000).toISOString().slice(0, 10);
+    const usadas = [];
+    cargas.forEach(c => { if (c.desde >= ini && c.hasta <= fin && !usadas.some(u => !(c.hasta < u.desde || c.desde > u.hasta))) usadas.push(c); });
+    if (!usadas.length) usadas.push(cargas[0]);
+    const acc = new Map();
+    usadas.forEach(c => (c.items || []).forEach(it => {
+      const e = acc.get(String(it.k)) || { k: it.k, d: it.d, u: 0, f: 0, c: {} };
+      e.u += it.u || 0; e.f += it.f || 0;
+      (it.c || []).forEach(([col, u]) => { e.c[col] = (e.c[col] || 0) + u; });
+      acc.set(String(it.k), e);
+    }));
+    const dias = usadas.reduce((s, c) => s + lcDiasRango(c.desde, c.hasta), 0);
+    localData = { desde: usadas.map(c => c.desde).sort()[0], hasta: usadas.map(c => c.hasta).sort().reverse()[0], dias, cargas: usadas.length,
+      conPlata: usadas.every(c => (c.items || []).some(i => i.f)), items: Array.from(acc.values()).map(e => ({ ...e, c: Object.entries(e.c) })) };
+  }
   db.ref("dashboard_local_map").on("value", s => { localMap = s.val() || {}; localIdx = null; if (data) renderFoco(); });
   db.ref("dashboard_foco/canal").on("value", s => { if (s.val()) focoCanal = s.val(); if (data) renderFoco(); });
   const lcNorm = s => String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const lcKey = k => String(k).replace(/[.#$/\[\]]/g, "_");
   const localDias = () => { if (!localData || !localData.desde || !localData.hasta) return 30;
-    return Math.max(1, Math.round((new Date(localData.hasta) - new Date(localData.desde)) / 86400000) + 1); };
+    return localData.dias || lcDiasRango(localData.desde, localData.hasta); };
   // Cruza cada código del local con un producto de Tienda Nube: asignación manual → SKU → nombre igual → nombre contenido (único).
   function localIndice() {
-    if (localIdx && localIdx.data === data) return localIdx;
+    if (localIdx && localIdx.data === data && localIdx.ld === localData) return localIdx;
     const porProd = new Map(), sinCruzar = [];
     const prods = (data && data.productos || []).filter(p => p.id != null);
     const porSku = new Map(), porNombre = new Map();
@@ -1171,58 +1208,150 @@
       const p = buscar(it);
       if (p === "x") return;
       if (!p) { if (it.u > 0) sinCruzar.push(it); return; }
-      const e = porProd.get(p.id) || { u: 0, colores: new Map() };
-      e.u += it.u;
+      const e = porProd.get(p.id) || { u: 0, f: 0, colores: new Map() };
+      e.u += it.u; e.f += it.f || 0;
       (it.c || []).forEach(([col, u]) => { const k = lcNorm(col); e.colores.set(k, (e.colores.get(k) || 0) + u); });
       porProd.set(p.id, e);
     });
     sinCruzar.sort((a, b) => b.u - a.u);
-    localIdx = { data, porProd, sinCruzar };
+    // Costo unitario por producto (promedio de los códigos del local que cruzan con él).
+    const costo = new Map(), cAcc = new Map();
+    Object.entries(localCostos || {}).forEach(([k, c]) => { if (!c || !(c.cu > 0)) return;
+      const p = buscar({ k: c.k || k, d: c.d || "" }); if (!p || p === "x") return;
+      const a = cAcc.get(p.id) || [0, 0]; a[0] += c.cu; a[1]++; cAcc.set(p.id, a); });
+    cAcc.forEach(([s, n], id) => costo.set(id, s / n));
+    localIdx = { data, ld: localData, porProd, sinCruzar, costo };
     return localIdx;
   }
   // Venta del local llevada al período elegido (el reporte es un total del rango cargado → promedio diario × días).
   const focoFactorLocal = () => focoPerDias() / localDias();
   const localVend = p => { if (!localData) return 0; const e = localIndice().porProd.get(p.id); return e ? e.u * focoFactorLocal() : 0; };
+  // $ del local llevado al período; si la carga no trae plata, se estima con el precio web menos 10%.
+  const LOCAL_DTO = 0.10;
+  const localFact = p => { if (!localData) return 0; const e = localIndice().porProd.get(p.id); if (!e) return 0;
+    if (e.f) return e.f * focoFactorLocal();
+    const pv = p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo], pu = pv && pv.unidades ? pv.facturacion / pv.unidades : ((p.variantes || [])[0] || {}).precio || 0;
+    return e.u * focoFactorLocal() * pu * (1 - LOCAL_DTO); };
+  const costoU = p => (data && localIndice().costo.get(p.id)) || null;
   const focoVendC = p => focoCanal === "web" ? clVend(p) : focoCanal === "local" ? localVend(p) : clVend(p) + localVend(p);
   const localColorVend = (p, color) => { if (!localData || focoCanal === "web") return 0; const e = localIndice().porProd.get(p.id);
     return e ? (e.colores.get(lcNorm(color)) || 0) * focoFactorLocal() : 0; };
-  // Lee los Excel del local (uno o varios, por el límite de 300 filas) y los guarda unidos.
-  async function localSubir(files, desde, hasta) {
-    const acc = new Map();
+  // Lee los Excel de Ninox del local. Reconoce solo cada archivo por sus columnas:
+  //  - "Ranking de artículos" (Código, Descripción, Cantidad, Color, Talle, Total): unidades, color y $ (puede venir en varios archivos por el límite de 300 filas)
+  //  - "Ganancia por Artículos" (Código, Descripción, Cantidad, Venta Total, Costo Total, Ganancia): $ y costo
+  // Si están los dos, unidades/color/$ salen del Ranking y el costo del de Ganancia.
+  async function lcLeer(files) {
+    const rank = new Map(), gan = new Map(), tipos = [];
     for (const f of files) {
       const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null });
-      const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo"));
-      if (h < 0) throw new Error(`"${f.name}" no tiene la columna Codigo.`);
+      const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad"));
+      if (h < 0) throw new Error(`"${f.name}" no tiene las columnas Código y Cantidad.`);
       const col = n => rows[h].findIndex(c => lcNorm(c) === n);
       const iK = col("codigo"), iD = col("descripcion"), iU = col("cantidad"), iC = col("color");
-      if (iD < 0 || iU < 0) throw new Error(`"${f.name}" no tiene Descripcion o Cantidad.`);
+      const iCo = col("costo total"), iVT = col("venta total"), iT = col("total");
+      const esGan = iCo >= 0;
+      if (!esGan && iT < 0 && iC < 0) throw new Error(`"${f.name}" no parece ni el Ranking de artículos ni Ganancia por Artículos.`);
+      tipos.push(esGan ? "ganancia" : "ranking");
+      const num = v => typeof v === "number" ? v : parseNumAR(v);
       rows.slice(h + 1).forEach(r => {
-        if (!r || r[iK] == null || r[iU] == null) return;
-        const k = String(r[iK]).trim(), u = Number(r[iU]) || 0, color = iC >= 0 && r[iC] ? String(r[iC]).trim() : "Sin color";
-        const e = acc.get(k) || { k, d: String(r[iD] || "").trim(), u: 0, c: {} };
-        e.u += u; e.c[color] = (e.c[color] || 0) + u; acc.set(k, e);
+        if (!r || r[iK] == null || String(r[iK]).trim() === "" || r[iU] == null) return;
+        const k = String(r[iK]).trim(), d = String(iD >= 0 ? r[iD] || "" : "").trim(), u = num(r[iU]);
+        if (esGan) {
+          const e = gan.get(k) || { k, d, u: 0, f: 0, co: 0 };
+          e.u += u; e.f += iVT >= 0 ? num(r[iVT]) : 0; e.co += num(r[iCo]); gan.set(k, e);
+        } else {
+          const color = iC >= 0 && r[iC] ? String(r[iC]).trim() : "Sin color";
+          const e = rank.get(k) || { k, d, u: 0, f: 0, c: {} };
+          e.u += u; e.f += iT >= 0 ? num(r[iT]) : 0; e.c[color] = (e.c[color] || 0) + u; rank.set(k, e);
+        }
       });
     }
-    const items = Array.from(acc.values()).map(e => ({ k: e.k, d: e.d, u: e.u, c: Object.entries(e.c) }));
-    await db.ref("dashboard_local").set({ desde, hasta, cargado: new Date().toISOString(), archivos: files.length, items });
-    return items;
+    const base = rank.size ? rank : gan;
+    const items = Array.from(base.values()).map(e => ({ k: e.k, d: e.d, u: e.u, f: Math.round(e.f || 0), c: e.c ? Object.entries(e.c) : [] }));
+    const costos = {};
+    gan.forEach(e => { if (e.u > 0 && e.co > 0) costos[lcKey(e.k)] = { k: e.k, d: e.d, cu: Math.round(e.co / e.u) }; });
+    return { items, costos, tipos };
   }
+  // Guarda una carga. Si se superpone con otras, las reemplaza (así nada se cuenta dos veces).
+  // Para Objetivos: si es de 7 días o menos se guarda en la semana del lunes del "desde"; si es más larga, con la fecha "hasta".
+  async function localSubir(files, desde, hasta) {
+    const { items, costos, tipos } = await lcLeer(files);
+    if (!items.length) throw new Error("No encontré artículos en los archivos.");
+    const pisadas = lcListaCargas().filter(c => c.id !== "legacy" && !(hasta < c.desde || desde > c.hasta));
+    if (pisadas.length && !confirm(`Esta carga se superpone con ${pisadas.map(c => lcRangoTxt(c)).join(", ")}. Se reemplaza${pisadas.length > 1 ? "n" : ""} por la nueva. ¿Seguimos?`)) throw new Error("Cancelado.");
+    const id = desde + "_" + hasta, ahora = new Date().toISOString(), U = {};
+    pisadas.forEach(c => { U["dashboard_local_cargas/" + c.id] = null; if (c.objKey) U["dashboard_objetivos/local/semanas/" + c.objKey] = null; });
+    const objKey = lcDiasRango(desde, hasta) <= 7 ? weekKey(new Date(desde + "T12:00:00")) : hasta;
+    U["dashboard_local_cargas/" + id] = { desde, hasta, cargado: ahora, archivos: files.length, tipos, objKey, items };
+    Object.entries(costos).forEach(([k, c]) => { U["dashboard_local_costos/" + k] = { ...c, fecha: hasta }; });
+    const categorias = {};
+    let facturacion = 0, unidades = 0;
+    items.forEach(it => { const cat = categorizarDescripcionLocal(it.d); const e = categorias[cat] || { facturacion: 0, unidades: 0 };
+      e.facturacion += it.f; e.unidades += it.u; categorias[cat] = e; facturacion += it.f; unidades += it.u; });
+    U["dashboard_objetivos/local/semanas/" + objKey] = { facturacion, unidades, categorias, cargaId: id, desde, hasta };
+    await db.ref().update(U);
+    return { items, costos, tipos, facturacion, unidades, objKey };
+  }
+  const lcF = s => s ? s.split("-").reverse().slice(0, 2).join("/") : "";
+  const lcRangoTxt = c => `${lcF(c.desde)} al ${lcF(c.hasta)}`;
+  function lcBorrar(id) {
+    const c = lcListaCargas().find(x => x.id === id); if (!c) return;
+    if (!confirm(`¿Borrar la carga del local del ${lcRangoTxt(c)}? También se saca de Objetivos.`)) return;
+    const U = { ["dashboard_local_cargas/" + id]: null };
+    if (c.objKey) U["dashboard_objetivos/local/semanas/" + c.objKey] = null;
+    db.ref().update(U);
+  }
+  // Panel de carga (el mismo en Foco y en Objetivos). pre = prefijo de ids.
+  function lcPanelHtml(pre) {
+    const hoy = new Date(), iso = d => d.toISOString().slice(0, 10);
+    const lunesPas = mondayOfWeek(new Date(hoy - 7 * 86400000)), domPas = new Date(lunesPas.getTime() + 6 * 86400000);
+    const cargas = lcListaCargas().filter(c => c.id !== "legacy");
+    return `<div class="card p-3 mt-2 text-sm space-y-2">
+      <div>Subí los Excel de Ninox del local para un período: el <b>Ranking de artículos</b> (con color, puede ser en varios archivos) y, si querés ganancia, también <b>Ganancia por Artículos</b>. Elegilos todos juntos: la app reconoce cuál es cuál. Sirve para el Foco y para Objetivos.</div>
+      <div class="flex flex-wrap gap-1.5 items-center text-xs"><span class="text-slate-500">Rápido:</span>
+        <button class="pill" data-lcq="${pre}" data-d="${iso(lunesPas)}" data-h="${iso(domPas)}">Semana pasada</button>
+        <button class="pill" data-lcq="${pre}" data-d="${iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1))}" data-h="${iso(hoy)}">Este mes</button>
+        <button class="pill" data-lcq="${pre}" data-d="${iso(new Date(hoy - 29 * 86400000))}" data-h="${iso(hoy)}">Últimos 30 días</button></div>
+      <div class="flex flex-wrap gap-2 items-center"><label class="text-xs">Desde <input type="date" id="${pre}Desde" value="${iso(lunesPas)}" class="border rounded px-2 py-1"></label>
+        <label class="text-xs">Hasta <input type="date" id="${pre}Hasta" value="${iso(domPas)}" class="border rounded px-2 py-1"></label>
+        <input type="file" id="${pre}Files" accept=".xlsx,.xls" multiple class="text-xs">
+        <button class="pill active" id="${pre}Guardar">Guardar</button><span id="${pre}Msg" class="text-xs"></span></div>
+      ${cargas.length ? `<div class="pt-2 border-t border-slate-100"><div class="text-xs font-semibold text-slate-500 mb-1">Cargas del local</div>
+        <div class="space-y-1">${cargas.slice(0, 12).map(c => { const u = (c.items || []).reduce((s, i) => s + (i.u || 0), 0), f = (c.items || []).reduce((s, i) => s + (i.f || 0), 0);
+          return `<div class="flex flex-wrap gap-2 items-center text-xs"><span class="w-28">${lcRangoTxt(c)}</span><span class="text-slate-500">${fmtNum(u)} u.${f ? " · " + fmtMoney(f) : ""}${(c.tipos || []).includes("ganancia") ? " · con costo" : ""}${(c.tipos || []).includes("ranking") ? " · con color" : ""}</span><button class="text-red-600 underline" data-lcdel="${focoEsc(c.id)}">borrar</button></div>`; }).join("")}</div></div>` : ""}
+    </div>`;
+  }
+  function lcBind(pre, alTerminar) {
+    const q = id => document.getElementById(pre + id);
+    document.querySelectorAll(`[data-lcq="${pre}"]`).forEach(b => b.onclick = () => { q("Desde").value = b.dataset.d; q("Hasta").value = b.dataset.h; });
+    document.querySelectorAll("[data-lcdel]").forEach(b => b.onclick = () => lcBorrar(b.dataset.lcdel));
+    if (!q("Guardar")) return;
+    q("Guardar").onclick = async () => {
+      const files = Array.from(q("Files").files || []), msg = q("Msg");
+      if (!files.length) { msg.textContent = "Elegí los archivos primero."; msg.style.color = "#b91c1c"; return; }
+      const d = q("Desde").value, h = q("Hasta").value;
+      if (!d || !h || d > h) { msg.textContent = "Revisá las fechas."; msg.style.color = "#b91c1c"; return; }
+      msg.textContent = "Leyendo…"; msg.style.color = "";
+      try { const r = await localSubir(files, d, h);
+        const sinCosto = !r.tipos.includes("ganancia") ? " Sin archivo de Ganancia: se usa el último costo conocido." : "";
+        const sinColor = !r.tipos.includes("ranking") ? " Sin Ranking: no hay color del local en esta carga." : "";
+        msg.style.color = "#15803d"; msg.textContent = `✓ ${r.items.length} artículos · ${fmtNum(r.unidades)} u. · ${fmtMoney(r.facturacion)}.${sinCosto}${sinColor}`;
+        if (alTerminar) setTimeout(alTerminar, 2500); }
+      catch (err) { msg.textContent = err.message === "Cancelado." ? "" : "No se pudo cargar: " + err.message; msg.style.color = "#b91c1c"; }
+    };
+  }
+  function lcRenderObj() { const el = document.getElementById("objLcPanel"); if (!el || !data) return; el.innerHTML = lcPanelHtml("lco"); lcBind("lco"); }
   function localBarra() {
     const ld = localData, idx = ld ? localIndice() : null;
     const fmtF = s => s ? s.split("-").reverse().slice(0, 2).join("/") : "";
     const hoy = new Date(), hace = new Date(hoy - 29 * 86400000), iso = d => d.toISOString().slice(0, 10);
     const tot = ld ? (ld.items || []).reduce((s, i) => s + (i.u || 0), 0) : 0;
-    const estado = ld ? `🏬 Local cargado: ${fmtF(ld.desde)} al ${fmtF(ld.hasta)} · ${fmtNum(tot)} u. · ${fmtNum((ld.items || []).length)} artículos${idx.sinCruzar.length ? ` · <button class="underline font-semibold" style="color:#92400e" id="lcVerSin">${idx.sinCruzar.length} sin cruzar</button>` : " · todo cruzado"}`
+    const estado = ld ? `🏬 Local: ${fmtF(ld.desde)} al ${fmtF(ld.hasta)}${ld.cargas > 1 ? ` (${ld.cargas} cargas)` : ""} · ${fmtNum(tot)} u. · ${fmtNum((ld.items || []).length)} artículos${ld.conPlata ? "" : " · $ estimado"}${idx.sinCruzar.length ? ` · <button class="underline font-semibold" style="color:#92400e" id="lcVerSin">${idx.sinCruzar.length} sin cruzar</button>` : " · todo cruzado"}`
       : "🏬 Todavía no hay ventas del local cargadas.";
     const opts = localPanel === "sin" ? (data.productos || []).filter(p => p.id != null).sort((a, b) => String(a.producto).localeCompare(String(b.producto)))
       .map(p => `<option value="${p.id}">${focoEsc(p.producto)}</option>`).join("") : "";
-    const panel = localPanel === "subir" ? `<div class="card p-3 mt-2 text-sm space-y-2">
-        <div>Elegí todos los Excel del reporte "Artículos más vendidos" juntos y el rango de fechas que cubren. Reemplaza la carga anterior.</div>
-        <div class="flex flex-wrap gap-2 items-center"><label class="text-xs">Desde <input type="date" id="lcDesde" value="${iso(hace)}" class="border rounded px-2 py-1"></label>
-        <label class="text-xs">Hasta <input type="date" id="lcHasta" value="${iso(hoy)}" class="border rounded px-2 py-1"></label>
-        <input type="file" id="lcFiles" accept=".xlsx,.xls" multiple class="text-xs">
-        <button class="pill active" id="lcGuardar">Guardar</button><span id="lcMsg" class="text-xs"></span></div></div>`
+    const panel = localPanel === "subir" ? lcPanelHtml("lc")
       : localPanel === "sin" && idx ? `<div class="card p-3 mt-2 text-sm"><div class="mb-2">Artículos del local que no encontré en Tienda Nube. Elegí a cuál corresponde cada uno (se recuerda para las próximas cargas) o ignoralo.</div>
         <div class="space-y-1.5">${idx.sinCruzar.map(it => `<div class="flex flex-wrap gap-2 items-center"><span class="text-xs w-full md:w-80 truncate"><b>${fmtNum(it.u)}</b> u. · ${focoEsc(it.d)} <span class="text-slate-400">(${focoEsc(it.k)})</span></span>
           <select class="border rounded px-2 py-1 text-xs max-w-xs" data-lcmap="${focoEsc(lcKey(it.k))}"><option value="">Asignar a…</option><option value="x">Ignorar (no es de la web)</option>${opts}</select></div>`).join("")}</div></div>` : "";
@@ -1233,15 +1362,7 @@
     const q = id => document.getElementById(id);
     if (q("lcSubir")) q("lcSubir").onclick = () => { localPanel = localPanel === "subir" ? false : "subir"; renderFoco(); };
     if (q("lcVerSin")) q("lcVerSin").onclick = () => { localPanel = localPanel === "sin" ? false : "sin"; renderFoco(); };
-    if (q("lcGuardar")) q("lcGuardar").onclick = async () => {
-      const files = Array.from(q("lcFiles").files || []), msg = q("lcMsg");
-      if (!files.length) { msg.textContent = "Elegí los archivos primero."; msg.style.color = "#b91c1c"; return; }
-      if (!q("lcDesde").value || !q("lcHasta").value || q("lcDesde").value > q("lcHasta").value) { msg.textContent = "Revisá las fechas."; msg.style.color = "#b91c1c"; return; }
-      msg.textContent = "Leyendo…"; msg.style.color = "";
-      try { const items = await localSubir(files, q("lcDesde").value, q("lcHasta").value); localPanel = false;
-        alert(`Listo: ${files.length} archivo(s), ${items.length} artículos, ${fmtNum(items.reduce((s, i) => s + i.u, 0))} unidades.`); }
-      catch (err) { msg.textContent = "No se pudo cargar: " + err.message; msg.style.color = "#b91c1c"; }
-    };
+    lcBind("lc", () => { localPanel = false; renderFoco(); });
     document.querySelectorAll("[data-lcmap]").forEach(s => s.onchange = () => { if (s.value) db.ref("dashboard_local_map/" + s.dataset.lcmap).set(s.value); });
   }
   const FOCO_EMPUJAR_MIN = 5;
@@ -1482,7 +1603,7 @@
     const fl = s => s ? s.split("-").reverse().slice(0, 2).join("/") : "";
     const canal = focoCanal === "web" ? "web" : focoCanal === "local" ? "local" : "web + local";
     let t = `📅 Ventas ${canal} del <b>${f(desde)}</b> al <b>${f(hasta)}</b> (${dias} días)`;
-    if (focoCanal !== "web") t += localData ? ` · Local: reporte del ${fl(localData.desde)} al ${fl(localData.hasta)}, llevado a ${dias} días` : ` · <span style="color:#b45309">sin reporte del local cargado</span>`;
+    if (focoCanal !== "web") t += localData ? ` · Local: ${localData.cargas > 1 ? localData.cargas + " cargas" : "carga"} del ${fl(localData.desde)} al ${fl(localData.hasta)}${localDias() !== dias ? `, llevado a ${dias} días` : ""}` : ` · <span style="color:#b45309">sin reporte del local cargado</span>`;
     return t + ` · Stock: web`;
   }
   function flFila(p, topIds) {
@@ -1548,13 +1669,14 @@
     const bloques = keys.map(k => {
       const arr = secs.get(k).sort(crit), nom = k.split("|")[0];
       const st = arr.reduce((s, p) => s + (p.stockTotal || 0), 0), vv = Math.round(arr.reduce((s, p) => s + vt(p), 0)), ff = arr.reduce((s, p) => s + flFact(p), 0);
+      const conG = arr.filter(p => flGan(p) != null), gg = conG.reduce((s, p) => s + flGan(p), 0), fg = conG.reduce((s, p) => s + flFact(p), 0);
       const c = {}; arr.forEach(p => { const e = flEstado(p); c[e] = (c[e] || 0) + 1; });
       const res = ["rep", "clav", "emp"].filter(e => c[e]).map(e => `<b style="color:${FL_ESTADOS[e].c}">${c[e]} ${FL_ESTADOS[e].l.toLowerCase()}</b>`).join(" · ");
       const abierto = flAbiertas.has(focoModo + "|" + k);
       return `<details class="card mb-3 overflow-hidden fl-sec" data-flsec="${focoEsc(focoModo + "|" + k)}" ${abierto ? "open" : ""}>
         <summary class="px-4 py-3 flex justify-between items-center flex-wrap gap-x-3 gap-y-1 cursor-pointer select-none" style="list-style:none">
           <div class="font-bold flex items-center gap-2"><span class="fl-flecha text-slate-400" style="display:inline-block;transition:transform .15s">›</span>${focoEsc(nom.toUpperCase())}</div>
-          <div class="text-xs text-slate-500">${arr.length} artículo${arr.length !== 1 ? "s" : ""} · ${fmtNum(st)} u. · ${fmtNum(vv)} vendidas · ${fmtMoney(ff)} web${res ? " · " + res : ""}</div></summary>
+          <div class="text-xs text-slate-500">${arr.length} artículo${arr.length !== 1 ? "s" : ""} · ${fmtNum(st)} u. · ${fmtNum(vv)} vendidas · ${fmtMoney(ff)} ${flCanalTxt()}${fg ? ` · ganancia ${Math.round(gg / fg * 100)}%` : ""}${res ? " · " + res : ""}</div></summary>
         ${flResumen(secsTodos.get(k) || arr, nom)}
         ${flTabla(arr, topIds)}</details>`;
     }).join("");
@@ -1571,7 +1693,11 @@
   // ---- Secciones colapsables del Foco en lista: arrancan cerradas; lo que abrís se recuerda en este dispositivo ----
   let flRank = "u"; // u = unidades · $ = facturación web
   db.ref("dashboard_foco/rankPor").on("value", s => { if (s.val()) flRank = s.val(); if (data) renderFoco(); });
-  const flFact = p => (p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo] && p.ventasPorPeriodo[focoPeriodo].facturacion) || 0;
+  const flFactWeb = p => (p.ventasPorPeriodo && p.ventasPorPeriodo[focoPeriodo] && p.ventasPorPeriodo[focoPeriodo].facturacion) || 0;
+  // $ y ganancia del canal elegido en "Ventas de" (web, local o las dos).
+  const flFact = p => focoCanal === "web" ? flFactWeb(p) : focoCanal === "local" ? localFact(p) : flFactWeb(p) + localFact(p);
+  const flGan = p => { const cu = costoU(p); return cu ? flFact(p) - focoVendC(p) * cu : null; };
+  const flCanalTxt = () => focoCanal === "web" ? "web" : focoCanal === "local" ? "local" : "web + local";
   const flAbiertas = new Set((() => { try { return JSON.parse(localStorage.getItem("fl_abiertas") || "[]"); } catch (e) { return []; } })());
   function flGuardarAbiertas() { try { localStorage.setItem("fl_abiertas", JSON.stringify([...flAbiertas])); } catch (e) {} }
   // Colores de un artículo (mismo criterio que focoColoresRep): cuál empujar y cuáles reponer.
@@ -1591,8 +1717,8 @@
     const conSt = arr.filter(p => (p.stockTotal || 0) > 0);
     const stTot = arr.reduce((s, p) => s + (p.stockTotal || 0), 0);
     const ds = p => { const d = focoDiasStock(p); return d == null ? "" : d === Infinity ? "sin ventas" : "~" + Math.round(d) + " d"; };
-    const rk = flRank === "$" ? flFact : vt;
-    const top = conSt.filter(p => rk(p) > 0).sort((a, b) => rk(b) - rk(a) || vt(b) - vt(a)).slice(0, 3);
+    const rk = flRank === "$" ? flFact : flRank === "g" ? (p => { const g = flGan(p); return g == null ? -1e15 : g; }) : vt;
+    const top = conSt.filter(p => vt(p) > 0).sort((a, b) => rk(b) - rk(a) || vt(b) - vt(a)).slice(0, 3);
     const repo = arr.filter(p => flEstado(p) === "rep").sort((a, b) => vt(b) - vt(a)).slice(0, 4);
     const quietos = arr.filter(p => ["clav", "emp"].includes(flEstado(p))).sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0));
     const clavU = arr.filter(p => flEstado(p) === "clav").reduce((s, p) => s + (p.stockTotal || 0), 0);
@@ -1601,8 +1727,9 @@
     const colTxt = p => { const c = flColores(p); return [c.emp ? `<span style="color:#2D5A3A">↗ Empujá <b>${focoEsc(c.emp.color)}</b> (${fmtNum(c.emp.stock)} u.)</span>` : "", c.rep.length ? `<span style="color:#b91c1c">↻ Reponé ${c.rep.slice(0, 3).map(focoEsc).join(", ")}${c.rep.length > 3 ? "…" : ""}</span>` : ""].filter(Boolean).join(" · "); };
     const caja = (tit, color, cuerpo) => `<div class="rounded-lg p-2.5" style="background:#fff;border:1px solid #e5e7eb"><div class="text-[11px] font-bold uppercase tracking-wide mb-1.5" style="color:${color}">${tit}</div>${cuerpo}</div>`;
     const vacio = t => `<div class="text-[11px] text-slate-400">${t}</div>`;
-    const rankBtns = `<span class="float-right normal-case tracking-normal font-normal">${[["u", "Unidades"], ["$", "Facturación"]].map(([k, l]) => `<button class="px-1.5 rounded ${flRank === k ? "bg-green-600 text-white" : "text-slate-500"}" data-flrank="${k}">${l}</button>`).join("")}</span>`;
-    const bVende = top.length ? top.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${flRank === "$" ? `<b>${fmtMoney(flFact(p))}</b> web · ${fmtNum(Math.round(vt(p)))} u.` : `<b>${fmtNum(Math.round(vt(p)))} u.</b> · ${fmtMoney(flFact(p))} web`} · stock ${fmtNum(p.stockTotal || 0)} · ${ds(p)}</div>${colTxt(p) ? `<div>${colTxt(p)}</div>` : ""}</div>`).join("") : vacio("Nada vendió en el período.");
+    const rankBtns = `<span class="float-right normal-case tracking-normal font-normal">${[["u", "Unidades"], ["$", "$"], ["g", "Ganancia"]].map(([k, l]) => `<button class="px-1.5 rounded ${flRank === k ? "bg-green-600 text-white" : "text-slate-500"}" data-flrank="${k}">${l}</button>`).join("")}</span>`;
+    const bVende = top.length ? top.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${(() => { const u = `${fmtNum(Math.round(vt(p)))} u.`, f = fmtMoney(flFact(p)), g = flGan(p), gt = g == null ? "sin costo" : `gan. ${fmtMoney(g)}${flFact(p) ? ` (${Math.round(g / flFact(p) * 100)}%)` : ""}`;
+      return flRank === "$" ? `<b>${f}</b> · ${u} · ${gt}` : flRank === "g" ? `<b>${gt}</b> · ${f} · ${u}` : `<b>${u}</b> · ${f} · ${gt}`; })()} · stock ${fmtNum(p.stockTotal || 0)} · ${ds(p)}</div>${colTxt(p) ? `<div>${colTxt(p)}</div>` : ""}</div>`).join("") : vacio("Nada vendió en el período.");
     const bRepo = repo.length ? repo.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${ds(p)}</div>${flColores(p).rep.length ? `<div style="color:#b91c1c">↻ ${flColores(p).rep.slice(0, 3).map(focoEsc).join(", ")}</div>` : ""}</div>`).join("") : vacio("Nada para reponer.");
     const accion = p => { const e = flEstado(p), d = focoDiasStock(p);
       if (e === "clav" && (d === Infinity || d >= FL_CLAVADO * 2)) return `<b style="color:#581c87">Ofertar / sacar</b>`;
@@ -1628,6 +1755,7 @@
   const FOCO_MODOS = [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["tn", "Tienda Nube (anterior)"]];
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
+    localRecalc();
     document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
     const esLista = focoVista === "lista";
     if (esLista && focoModo === "tn") focoModo = "grupo";
@@ -2993,6 +3121,7 @@
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
     renderAll();
+    try { lcRenderObj(); } catch (e) {}
   }, (err) => {
     document.getElementById("loading").innerHTML = '<div class="text-red-500 text-sm">Error cargando datos: ' + err.message + "</div>";
   });
