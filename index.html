@@ -32,6 +32,8 @@
   .chip-amber{background:#fef3c7;color:#92400e;}
   .view{display:none;}
   .view.active{display:block;}
+  .fl-sec > summary::-webkit-details-marker{display:none}
+  .fl-sec[open] .fl-flecha{transform:rotate(90deg)}
 </style>
 </head>
 <body class="h-full flex bg-slate-50 min-h-screen">
@@ -1517,6 +1519,7 @@
     let ps = clAsignados().filter(p => !focoOcultarSin || (p.stockTotal || 0) > 0);
     const cuenta = {}; ps.forEach(p => { const e = flEstado(p); cuenta[e] = (cuenta[e] || 0) + 1; });
     const filtros = [["todos", "Todos", ps.length], ...FL_ORDEN_EST.map(k => [k, FL_ESTADOS[k].l, cuenta[k] || 0])];
+    const psTodos = ps;
     if (flFiltro !== "todos") ps = ps.filter(p => flEstado(p) === flFiltro);
     const dsOrd = p => { const d = focoDiasStock(p); return d == null ? -1 : d === Infinity ? 1e9 : d; };
     const vt = p => focoVendC(p);
@@ -1531,8 +1534,9 @@
     else if (focoModo === "tendencia") claveDe = p => { const t = clTendDe(p).filter(x => !clEsGrupo(x)); return t.length ? t : ["Sin tendencia"]; };
     else if (focoModo === "ingreso") claveDe = p => { const i = flIngreso(p); if (!i) return "Sin fecha de ingreso"; const m = mondayOfWeek(i.fecha); return "Semana del " + m.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" }) + "|" + m.getTime(); };
     else { claveDe = flCat; ordenSec = [...clCfg.bases, "Sin categoría"]; }
-    const secs = new Map();
+    const secs = new Map(), secsTodos = new Map();
     ps.forEach(p => { [].concat(claveDe(p)).forEach(k => { if (!secs.has(k)) secs.set(k, []); secs.get(k).push(p); }); });
+    psTodos.forEach(p => { [].concat(claveDe(p)).forEach(k => { if (!secsTodos.has(k)) secsTodos.set(k, []); secsTodos.get(k).push(p); }); });
     let keys = [...secs.keys()];
     if (focoModo === "ingreso") keys.sort((a, b) => (+(b.split("|")[1]) || 0) - (+(a.split("|")[1]) || 0));
     else if (ordenSec) keys.sort((a, b) => ((ordenSec.indexOf(a) + 1) || 999) - ((ordenSec.indexOf(b) + 1) || 999));
@@ -1546,12 +1550,66 @@
       const st = arr.reduce((s, p) => s + (p.stockTotal || 0), 0), vv = Math.round(arr.reduce((s, p) => s + vt(p), 0));
       const c = {}; arr.forEach(p => { const e = flEstado(p); c[e] = (c[e] || 0) + 1; });
       const res = ["rep", "clav", "emp"].filter(e => c[e]).map(e => `<b style="color:${FL_ESTADOS[e].c}">${c[e]} ${FL_ESTADOS[e].l.toLowerCase()}</b>`).join(" · ");
-      return `<div class="card mb-4 overflow-hidden"><div class="px-4 pt-3 pb-2 flex justify-between items-baseline flex-wrap gap-2">
-        <div class="font-bold">${focoEsc(nom.toUpperCase())}</div>
-        <div class="text-xs text-slate-500">${arr.length} artículo${arr.length !== 1 ? "s" : ""} · ${fmtNum(st)} u. · ${fmtNum(vv)} vendidas${res ? " · " + res : ""}</div></div>${flTabla(arr, topIds)}</div>`;
+      const abierto = flAbiertas.has(focoModo + "|" + k);
+      return `<details class="card mb-3 overflow-hidden fl-sec" data-flsec="${focoEsc(focoModo + "|" + k)}" ${abierto ? "open" : ""}>
+        <summary class="px-4 py-3 flex justify-between items-center flex-wrap gap-x-3 gap-y-1 cursor-pointer select-none" style="list-style:none">
+          <div class="font-bold flex items-center gap-2"><span class="fl-flecha text-slate-400" style="display:inline-block;transition:transform .15s">›</span>${focoEsc(nom.toUpperCase())}</div>
+          <div class="text-xs text-slate-500">${arr.length} artículo${arr.length !== 1 ? "s" : ""} · ${fmtNum(st)} u. · ${fmtNum(vv)} vendidas${res ? " · " + res : ""}</div></summary>
+        ${flResumen(secsTodos.get(k) || arr, nom)}
+        ${flTabla(arr, topIds)}</details>`;
     }).join("");
-    cont.innerHTML = aviso + bar + (bloques || '<div class="card p-4 text-sm text-slate-500">No hay artículos con este filtro.</div>');
+    const todasAb = keys.length && keys.every(k => flAbiertas.has(focoModo + "|" + k));
+    const ctrl = keys.length > 1 ? `<div class="flex justify-end mb-2"><button class="pill" id="flToggleAll">${todasAb ? "Cerrar todas" : "Abrir todas"}</button></div>` : "";
+    cont.innerHTML = aviso + bar + ctrl + (bloques || '<div class="card p-4 text-sm text-slate-500">No hay artículos con este filtro.</div>');
     cont.querySelectorAll("[data-flf]").forEach(b => b.onclick = () => { flFiltro = b.dataset.flf; renderFoco(); });
+    cont.querySelectorAll("[data-flsec]").forEach(d => d.ontoggle = () => { const k = d.dataset.flsec; if (d.open) flAbiertas.add(k); else flAbiertas.delete(k); flGuardarAbiertas(); });
+    const ta = document.getElementById("flToggleAll");
+    if (ta) ta.onclick = () => { const abrir = !todasAb; keys.forEach(k => { const kk = focoModo + "|" + k; if (abrir) flAbiertas.add(kk); else flAbiertas.delete(kk); }); flGuardarAbiertas(); renderFoco(); };
+  }
+
+  // ---- Secciones colapsables del Foco en lista: arrancan cerradas; lo que abrís se recuerda en este dispositivo ----
+  const flAbiertas = new Set((() => { try { return JSON.parse(localStorage.getItem("fl_abiertas") || "[]"); } catch (e) { return []; } })());
+  function flGuardarAbiertas() { try { localStorage.setItem("fl_abiertas", JSON.stringify([...flAbiertas])); } catch (e) {} }
+  // Colores de un artículo (mismo criterio que focoColoresRep): cuál empujar y cuáles reponer.
+  function flColores(p) {
+    let colores;
+    try { colores = agruparReposicion(calcularReposicion(p, focoPeriodo), "color", focoPeriodo); } catch (err) { return { emp: null, rep: [] }; }
+    if (!colores || !colores.length) return { emp: null, rep: [] };
+    const perD = diasParaPeriodo(focoPeriodo);
+    const dsCol = c => { const u = (focoCanal === "local" ? 0 : c.unidades) + localColorVend(p, c.color); return u > 0 ? c.stock / (u / perD) : Infinity; };
+    const rep = colores.filter(c => c.orden === 0 || c.orden === 1).map(c => c.color);
+    const emp = colores.filter(c => c.stock >= FOCO_EMPUJAR_MIN && !rep.includes(c.color)).sort((a, b) => dsCol(b) - dsCol(a) || b.stock - a.stock)[0] || null;
+    return { emp, rep };
+  }
+  // Resumen para decidir por categoría: qué se vende (y qué color empujar/reponer), qué reponer ya y qué no sale.
+  function flResumen(arr, nom) {
+    const vt = p => focoVendC(p);
+    const conSt = arr.filter(p => (p.stockTotal || 0) > 0);
+    const stTot = arr.reduce((s, p) => s + (p.stockTotal || 0), 0);
+    const ds = p => { const d = focoDiasStock(p); return d == null ? "" : d === Infinity ? "sin ventas" : "~" + Math.round(d) + " d"; };
+    const top = conSt.filter(p => vt(p) > 0).sort((a, b) => vt(b) - vt(a)).slice(0, 3);
+    const repo = arr.filter(p => flEstado(p) === "rep").sort((a, b) => vt(b) - vt(a)).slice(0, 4);
+    const quietos = arr.filter(p => ["clav", "emp"].includes(flEstado(p))).sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0));
+    const clavU = arr.filter(p => flEstado(p) === "clav").reduce((s, p) => s + (p.stockTotal || 0), 0);
+    const pctClav = stTot ? Math.round(clavU / stTot * 100) : 0;
+    const nombre = p => `<span class="font-semibold">${focoEsc(p.producto)}</span>`;
+    const colTxt = p => { const c = flColores(p); return [c.emp ? `<span style="color:#2D5A3A">↗ Empujá <b>${focoEsc(c.emp.color)}</b> (${fmtNum(c.emp.stock)} u.)</span>` : "", c.rep.length ? `<span style="color:#b91c1c">↻ Reponé ${c.rep.slice(0, 3).map(focoEsc).join(", ")}${c.rep.length > 3 ? "…" : ""}</span>` : ""].filter(Boolean).join(" · "); };
+    const caja = (tit, color, cuerpo) => `<div class="rounded-lg p-2.5" style="background:#fff;border:1px solid #e5e7eb"><div class="text-[11px] font-bold uppercase tracking-wide mb-1.5" style="color:${color}">${tit}</div>${cuerpo}</div>`;
+    const vacio = t => `<div class="text-[11px] text-slate-400">${t}</div>`;
+    const bVende = top.length ? top.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(Math.round(vt(p)))} vendidas · ${fmtNum(p.stockTotal || 0)} u. · ${ds(p)}</div>${colTxt(p) ? `<div>${colTxt(p)}</div>` : ""}</div>`).join("") : vacio("Nada vendió en el período.");
+    const bRepo = repo.length ? repo.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${ds(p)}</div>${flColores(p).rep.length ? `<div style="color:#b91c1c">↻ ${flColores(p).rep.slice(0, 3).map(focoEsc).join(", ")}</div>` : ""}</div>`).join("") : vacio("Nada para reponer.");
+    const accion = p => { const e = flEstado(p), d = focoDiasStock(p);
+      if (e === "clav" && (d === Infinity || d >= FL_CLAVADO * 2)) return `<b style="color:#581c87">Ofertar / sacar</b>`;
+      if (e === "clav") return `<b style="color:#581c87">Ofertar o combinar</b>`;
+      return `<b style="color:#8A3B2E">Pautar / mostrar más</b>`; };
+    const bQuieto = quietos.length ? quietos.slice(0, 4).map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(Math.round(vt(p)))} vend. · ${ds(p)}</div><div>${accion(p)}</div></div>`).join("") + (quietos.length > 4 ? `<div class="text-[11px] text-slate-400">y ${quietos.length - 4} más</div>` : "") : vacio("Todo se está moviendo.");
+    const veredicto = !stTot ? "Sin stock en la categoría."
+      : pctClav >= 40 ? `<b style="color:#581c87">${pctClav}% del stock está clavado</b> (${fmtNum(clavU)} u.). La prioridad es mover eso antes de producir más.`
+      : repo.length ? `<b style="color:#d97706">${repo.length > 3 ? "Varios artículos" : repo.length === 1 ? "1 artículo" : repo.length + " artículos"} para reponer</b>${pctClav ? ` · ${pctClav}% del stock clavado` : ""}. No pautes fuerte lo que está por quedarse sin talles.`
+      : pctClav ? `${pctClav}% del stock clavado (${fmtNum(clavU)} u.).` : "La categoría está sana.";
+    return `<div class="px-3 pb-3"><div class="rounded-xl p-3" style="background:#f8fafc;border:1px solid #e2e8f0">
+      <div class="text-xs mb-2">${veredicto}</div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-2">${caja("Lo que más vende", "#16a34a", bVende)}${caja("Reponer ya", "#d97706", bRepo)}${caja("Sobra stock", "#581c87", bQuieto)}</div></div></div>`;
   }
 
   // ---------------- Foco: 6 categorías × (6 con más stock, 6 más vendidos) ----------------
