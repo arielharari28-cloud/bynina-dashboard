@@ -1682,12 +1682,51 @@
     }).join("");
     const todasAb = keys.length && keys.every(k => flAbiertas.has(focoModo + "|" + k));
     const ctrl = keys.length > 1 ? `<div class="flex justify-end mb-2"><button class="pill" id="flToggleAll">${todasAb ? "Cerrar todas" : "Abrir todas"}</button></div>` : "";
-    cont.innerHTML = aviso + bar + ctrl + (bloques || '<div class="card p-4 text-sm text-slate-500">No hay artículos con este filtro.</div>');
+    cont.innerHTML = aviso + bar + flResumenGeneral(psTodos, secsTodos) + ctrl + (bloques || '<div class="card p-4 text-sm text-slate-500">No hay artículos con este filtro.</div>');
     cont.querySelectorAll("[data-flf]").forEach(b => b.onclick = () => { flFiltro = b.dataset.flf; renderFoco(); });
     cont.querySelectorAll("[data-flsec]").forEach(d => d.ontoggle = () => { const k = d.dataset.flsec; if (d.open) flAbiertas.add(k); else flAbiertas.delete(k); flGuardarAbiertas(); });
     cont.querySelectorAll("[data-flrank]").forEach(b => b.onclick = e => { e.preventDefault(); flRank = b.dataset.flrank; db.ref("dashboard_foco/rankPor").set(flRank); renderFoco(); });
+    const rg = document.getElementById("flResGen"); if (rg) rg.ontoggle = () => { if (rg.open) flAbiertas.delete("__rescerrado"); else flAbiertas.add("__rescerrado"); flGuardarAbiertas(); };
+    cont.querySelectorAll("[data-flres]").forEach(b => b.onclick = () => { flResOrden = b.dataset.flres; renderFoco(); });
+    cont.querySelectorAll("[data-flgo]").forEach(b => b.onclick = () => { const k = b.dataset.flgo; flAbiertas.add(k); flGuardarAbiertas(); renderFoco();
+      const d = [...document.querySelectorAll("[data-flsec]")].find(x => x.dataset.flsec === k); if (d) d.scrollIntoView({ behavior: "smooth", block: "start" }); });
     const ta = document.getElementById("flToggleAll");
     if (ta) ta.onclick = () => { const abrir = !todasAb; keys.forEach(k => { const kk = focoModo + "|" + k; if (abrir) flAbiertas.add(kk); else flAbiertas.delete(kk); }); flGuardarAbiertas(); renderFoco(); };
+  }
+
+  // ---- Resumen general: cada sección (categoría, grupo, tendencia…) con unidades, $, ganancia y stock, y su % del total ----
+  let flResOrden = "$";
+  function flResumenGeneral(todos, secs) {
+    if (!secs || secs.size < 2) return "";
+    const vt = p => focoVendC(p);
+    const tot = { u: 0, f: 0, st: 0 };
+    todos.forEach(p => { tot.u += vt(p); tot.f += flFact(p); tot.st += p.stockTotal || 0; });
+    const filas = [...secs.entries()].map(([k, arr]) => {
+      const u = arr.reduce((s, p) => s + vt(p), 0), f = arr.reduce((s, p) => s + flFact(p), 0), st = arr.reduce((s, p) => s + (p.stockTotal || 0), 0);
+      const conG = arr.filter(p => flGan(p) != null), g = conG.reduce((s, p) => s + flGan(p), 0), fg = conG.reduce((s, p) => s + flFact(p), 0);
+      return { k, nom: k.split("|")[0], n: arr.length, u, f, st, mg: fg ? g / fg : null };
+    });
+    const ord = flResOrden === "u" ? (a, b) => b.u - a.u : flResOrden === "st" ? (a, b) => b.st - a.st : (a, b) => b.f - a.f;
+    filas.sort(ord);
+    const pc = (v, t) => t ? Math.round(v / t * 100) : 0;
+    const barra = (v, color) => `<div class="h-1.5 rounded bg-slate-100 mt-0.5"><div class="h-1.5 rounded" style="width:${Math.min(100, v)}%;background:${color}"></div></div>`;
+    const th = (k, l) => `<th class="py-2 pr-2 text-right font-semibold"><button class="${flResOrden === k ? "text-indigo-700 underline" : ""}" data-flres="${k}">${l}</button></th>`;
+    const multi = focoModo === "tendencia";
+    const filasHtml = filas.map(r => { const pu = pc(r.u, tot.u), pf = pc(r.f, tot.f), ps = pc(r.st, tot.st), dif = ps - pf;
+      const alerta = tot.f && r.st && dif >= 5 ? `<span class="text-[10px] font-bold" style="color:#581c87" title="Tiene más % del stock que % de la venta">sobra stock</span>`
+        : tot.f && pf - ps >= 5 ? `<span class="text-[10px] font-bold" style="color:#d97706" title="Vende más de lo que pesa en stock">falta stock</span>` : "";
+      return `<tr class="border-b border-slate-100 cursor-pointer hover:bg-slate-50" data-flgo="${focoEsc(focoModo + "|" + r.k)}">
+        <td class="py-2 pl-3 pr-2"><div class="font-semibold">${focoEsc(r.nom)}</div><div class="text-[10px] text-slate-400">${r.n} art. ${alerta}</div></td>
+        <td class="py-2 pr-2 text-right">${fmtNum(Math.round(r.u))}<div class="text-[10px] text-slate-400">${pu}%</div>${barra(pu, "#94a3b8")}</td>
+        <td class="py-2 pr-2 text-right font-semibold">${fmtMoney(r.f)}<div class="text-[10px] text-slate-400 font-normal">${pf}%</div>${barra(pf, "#16a34a")}</td>
+        <td class="py-2 pr-2 text-right">${r.mg == null ? "—" : Math.round(r.mg * 100) + "%"}</td>
+        <td class="py-2 pr-3 text-right">${fmtNum(r.st)}<div class="text-[10px] text-slate-400">${ps}%</div>${barra(ps, "#7c3aed")}</td></tr>`; }).join("");
+    return `<details class="card mb-4 overflow-hidden fl-sec" id="flResGen" ${flAbiertas.has("__rescerrado") ? "" : "open"}><summary class="px-4 py-3 flex justify-between items-center flex-wrap gap-2 cursor-pointer" style="list-style:none">
+        <div class="font-bold flex items-center gap-2"><span class="fl-flecha text-slate-400" style="display:inline-block;transition:transform .15s">›</span>RESUMEN POR ${focoModo === "categoria" ? "CATEGORÍA" : focoModo === "grupo" ? "GRUPO" : focoModo === "tendencia" ? "TENDENCIA" : "SEMANA DE INGRESO"}</div>
+        <div class="text-xs text-slate-500">${fmtNum(Math.round(tot.u))} vendidas · ${fmtMoney(tot.f)} ${flCanalTxt()} · ${fmtNum(tot.st)} u. en stock</div></summary>
+      <div class="overflow-x-auto"><table class="w-full text-xs"><thead class="text-slate-500 border-b border-slate-200"><tr><th class="py-2 pl-3 pr-2 text-left font-semibold">${focoModo === "categoria" ? "Categoría" : focoModo === "grupo" ? "Grupo" : focoModo === "tendencia" ? "Tendencia" : "Semana"}</th>
+        ${th("u", "Vendidas")}${th("$", "Facturación")}<th class="py-2 pr-2 text-right font-semibold">Margen</th>${th("st", "Stock")}</tr></thead><tbody>${filasHtml}</tbody></table></div>
+      <div class="px-4 py-2 text-[11px] text-slate-400">% sobre el total de lo que tiene foco · ventas de ${flCanalTxt()} en ${focoPerDias()} días · tocá una fila para abrirla. "Sobra stock": pesa en stock 5 puntos o más de lo que pesa en la venta; "falta stock", al revés.${multi ? " Un artículo puede estar en varias tendencias, así que los % suman más de 100." : ""}</div></details>`;
   }
 
   // ---- Secciones colapsables del Foco en lista: arrancan cerradas; lo que abrís se recuerda en este dispositivo ----
