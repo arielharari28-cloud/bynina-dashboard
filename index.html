@@ -50,6 +50,7 @@
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
+    <div class="navitem" data-view="marketing">📣 Pauta y clientas</div>
     <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest px-3 pt-4 pb-1">Configuración</div>
     <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadge" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:auto"></span></div>
   </nav>
@@ -64,6 +65,7 @@
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
+    <div class="navitem" data-view="marketing">📣 Pauta y clientas</div>
     <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadgeM" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:4px"></span></div>
   </nav>
 
@@ -385,6 +387,68 @@
       </div>
       <div id="cyberAviso" class="text-xs text-amber-800 mb-3"></div>
       <div id="cyberLista"></div>
+    </div>
+
+    <!-- ===================== PAUTA, INSTAGRAM Y CLIENTAS ===================== -->
+    <div class="view" data-view="marketing">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📣 Pauta y clientas</h1>
+      <p id="mkEstado" class="text-xs text-slate-400 mt-0.5 mb-4">Cargando...</p>
+      <div class="flex flex-wrap gap-1.5 mb-5" id="mkPills"></div>
+
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Pauta Meta: lo que dice Meta vs. lo que vendiste</div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-2" id="mkKpis"></div>
+      <p class="text-xs text-slate-500 mb-4" id="mkFechas"></p>
+
+      <div class="card mb-2 overflow-x-auto">
+        <table class="w-full text-sm min-w-[720px]">
+          <thead><tr class="bg-slate-50 text-left text-xs text-slate-500">
+            <th class="px-4 py-2.5 font-semibold">Desglose</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Inversión</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Ventas según Meta</th>
+            <th class="px-4 py-2.5 font-semibold text-right">ROAS Meta</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Venta web de la categoría</th>
+            <th class="px-4 py-2.5 font-semibold">Señal</th>
+          </tr></thead>
+          <tbody id="mkDesglose"></tbody>
+        </table>
+      </div>
+      <p class="text-xs text-slate-500 mb-6">El desglose sale del nombre de la campaña, el conjunto o el anuncio (básicos, tendencias, look, o una prenda como short o remera). "Venta web de la categoría" es todo lo vendido en la tienda de esa prenda, con o sin anuncio: sirve para comparar, no es una atribución exacta. La señal compara el ROAS Meta de cada fila contra el promedio de la cuenta.</p>
+
+      <div class="font-bold text-sm mb-2">🎯 Anuncios con más inversión</div>
+      <div class="card mb-8 overflow-x-auto">
+        <table class="w-full text-sm min-w-[720px]">
+          <thead><tr class="bg-slate-50 text-left text-xs text-slate-500">
+            <th class="px-4 py-2.5 font-semibold">Anuncio</th>
+            <th class="px-4 py-2.5 font-semibold">Desglose</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Inversión</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Ventas según Meta</th>
+            <th class="px-4 py-2.5 font-semibold text-right">ROAS Meta</th>
+          </tr></thead>
+          <tbody id="mkAnuncios"></tbody>
+        </table>
+      </div>
+
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Instagram: qué publicaciones mueven</div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3" id="mkIgKpis"></div>
+      <div class="flex flex-wrap gap-1.5 mb-3 items-center text-xs text-slate-500" id="mkIgOrden"></div>
+      <div class="card mb-8 overflow-x-auto">
+        <table class="w-full text-sm min-w-[760px]">
+          <thead><tr class="bg-slate-50 text-left text-xs text-slate-500">
+            <th class="px-4 py-2.5 font-semibold">Publicación</th>
+            <th class="px-4 py-2.5 font-semibold">Tipo</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Alcance</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Guardados</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Compartidos</th>
+            <th class="px-4 py-2.5 font-semibold text-right">Visitas al perfil</th>
+          </tr></thead>
+          <tbody id="mkIgPosts"></tbody>
+        </table>
+      </div>
+
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Clientas: quién vuelve y quién se enfría</div>
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4" id="mkGrupos"></div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2" id="mkClientasKpis"></div>
+      <p class="text-xs text-slate-500 mb-6" id="mkClientasNota"></p>
     </div>
 
     <div class="view" data-view="ganadores">
@@ -3164,6 +3228,207 @@
   }, (err) => {
     document.getElementById("loading").innerHTML = '<div class="text-red-500 text-sm">Error cargando datos: ' + err.message + "</div>";
   });
+</script>
+
+<script>
+  // ================= Pauta, Instagram y Clientas (oct 2026) =================
+  // Lee Firebase "dashboard_marketing", que llena scripts/sync-marketing.js una vez por día.
+  // Solo hay números agregados: ningún dato personal de clientas.
+  (function () {
+    let mk = null;
+    let mkPeriodo = "30dias";
+    let mkIgOrden = "visitasPerfil";
+    const MK_PERIODOS = [
+      { key: "7dias", label: "7 días", dias: 7 }, { key: "15dias", label: "15 días", dias: 15 },
+      { key: "30dias", label: "30 días", dias: 30 }, { key: "estemes", label: "Este mes" },
+    ];
+    const IG_ORDEN = [["visitasPerfil", "Visitas al perfil"], ["alcance", "Alcance"], ["guardados", "Guardados"], ["compartidos", "Compartidos"], ["fecha", "Más nuevas"]];
+
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+    const n = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const fmtRoas = v => (v == null || !isFinite(v) ? "—" : v.toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+    const fmtPct = v => (v == null ? "—" : Math.round(v * 100) + "%");
+
+    // Fechas en horario de Argentina, como "AAAA-MM-DD"
+    function fechaAR(d) {
+      const s = new Date(new Date(d).getTime() - 3 * 3600000);
+      return s.toISOString().slice(0, 10);
+    }
+    function sumarDias(f, k) { const d = new Date(f + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); }
+    const fCorta = f => f.split("-").reverse().slice(0, 2).join("/");
+
+    // "N días" = últimos N días cerrados (hasta ayer), igual que el resto del dashboard.
+    // "Este mes" = del 1 a hoy, contra los mismos días del mes anterior.
+    function rango(key) {
+      const hoy = fechaAR(new Date());
+      if (key === "estemes") {
+        const desde = hoy.slice(0, 8) + "01";
+        const dias = Number(hoy.slice(8, 10));
+        const d = new Date(desde + "T12:00:00Z"); d.setUTCMonth(d.getUTCMonth() - 1);
+        const antDesde = d.toISOString().slice(0, 10);
+        return { desde, hasta: hoy, antDesde, antHasta: sumarDias(antDesde, dias - 1) };
+      }
+      const dias = MK_PERIODOS.find(p => p.key === key).dias;
+      const hasta = sumarDias(hoy, -1), desde = sumarDias(hoy, -dias);
+      return { desde, hasta, antDesde: sumarDias(desde, -dias), antHasta: sumarDias(desde, -1) };
+    }
+    const enRango = (f, desde, hasta) => f >= desde && f <= hasta;
+    function sumarDiario(porDia, desde, hasta, campos) {
+      const out = {}; campos.forEach(c => (out[c] = 0));
+      Object.entries(porDia || {}).forEach(([f, v]) => { if (enRango(f, desde, hasta)) campos.forEach(c => (out[c] += n(v && v[c]))); });
+      return out;
+    }
+
+    function kpi(titulo, valor, sub, destacado) {
+      return `<div class="card p-5 ${destacado ? "border-indigo-200 bg-indigo-50" : ""}"><div class="text-xs font-semibold ${destacado ? "text-indigo-500" : "text-slate-500"} mb-2">${titulo}</div><div class="text-2xl font-bold ${destacado ? "text-indigo-700" : ""}">${valor}</div><div class="text-xs mt-1 text-slate-500">${sub || ""}</div></div>`;
+    }
+    function delta(actual, anterior, invertir) {
+      if (!anterior || actual == null) return "";
+      const p = (actual - anterior) / anterior; if (!isFinite(p) || Math.round(p * 100) === 0) return "";
+      const bueno = invertir ? p < 0 : p > 0;
+      return ` <span style="color:${bueno ? "#15803d" : "#b91c1c"};font-weight:600">${p > 0 ? "▲" : "▼"} ${Math.abs(Math.round(p * 100))}%</span>`;
+    }
+    function nombreDesglose(k) {
+      if (k.startsWith("cat_")) return k.slice(4).replace(/_/g, " ");
+      const d = ((mk.meta && mk.meta.desgloses) || []).find(x => x.id === k);
+      return d ? d.nombre : k;
+    }
+    // Venta web de una categoría de la pauta: suma las categorías de Tienda Nube cuyo nombre la contiene
+    // (ej. "Shorts" suma también "Pantalones - Shorts").
+    function ventaCategoria(cat, desde, hasta) {
+      const clave = norm(cat).replace(/s$/, "");
+      let total = 0;
+      Object.entries((mk.tienda && mk.tienda.porDiaCategoria) || {}).forEach(([f, cats]) => {
+        if (!enRango(f, desde, hasta)) return;
+        Object.entries(cats || {}).forEach(([c, v]) => { if (norm(c).includes(clave)) total += n(v); });
+      });
+      return total;
+    }
+
+    function renderPauta(r) {
+      const meta = mk.meta;
+      const kp = document.getElementById("mkKpis");
+      if (!meta) { kp.innerHTML = `<div class="card p-5 col-span-2 md:col-span-5 text-sm text-slate-500">Todavía no hay datos de Meta.</div>`; document.getElementById("mkDesglose").innerHTML = ""; document.getElementById("mkAnuncios").innerHTML = ""; return; }
+      const a = sumarDiario(meta.porDia, r.desde, r.hasta, ["inversion", "ventasMeta", "compras"]);
+      const b = sumarDiario(meta.porDia, r.antDesde, r.antHasta, ["inversion", "ventasMeta"]);
+      const t = sumarDiario(mk.tienda && mk.tienda.porDia, r.desde, r.hasta, ["facturacion", "pedidos"]);
+      const tb = sumarDiario(mk.tienda && mk.tienda.porDia, r.antDesde, r.antHasta, ["facturacion"]);
+      const roasMeta = a.inversion ? a.ventasMeta / a.inversion : null;
+      const roasReal = a.inversion ? t.facturacion / a.inversion : null;
+      const roasRealAnt = b.inversion ? tb.facturacion / b.inversion : null;
+      kp.innerHTML =
+        kpi("💸 Inversión", fmtMoney(a.inversion), "vs. período anterior" + delta(a.inversion, b.inversion, true)) +
+        kpi("📘 ROAS según Meta", fmtRoas(roasMeta), `${fmtMoney(a.ventasMeta)} en ventas atribuidas`) +
+        kpi("✅ ROAS real", fmtRoas(roasReal), "Facturación web ÷ inversión" + delta(roasReal, roasRealAnt), true) +
+        kpi("🛒 Facturación web", fmtMoney(t.facturacion), `${fmtNum(t.pedidos)} pedidos pagados` + delta(t.facturacion, tb.facturacion)) +
+        kpi("🎯 Inversión por pedido", t.pedidos ? fmtMoney(a.inversion / t.pedidos) : "—", "Inversión ÷ pedidos de la web");
+      document.getElementById("mkFechas").textContent = `Del ${fCorta(r.desde)} al ${fCorta(r.hasta)}, comparado con ${fCorta(r.antDesde)} al ${fCorta(r.antHasta)}. El ROAS real toma toda la venta de la web, también la que no vino por anuncios.`;
+
+      // Desglose
+      const acc = {};
+      Object.entries(meta.porDiaDesglose || {}).forEach(([f, dd]) => {
+        if (!enRango(f, r.desde, r.hasta)) return;
+        Object.entries(dd || {}).forEach(([k, v]) => {
+          const e = acc[k] || (acc[k] = { inversion: 0, ventasMeta: 0 });
+          e.inversion += n(v.inversion); e.ventasMeta += n(v.ventasMeta);
+        });
+      });
+      const filas = Object.entries(acc).filter(([, v]) => v.inversion > 0).sort((x, y) => y[1].inversion - x[1].inversion);
+      document.getElementById("mkDesglose").innerHTML = filas.length ? filas.map(([k, v]) => {
+        const roas = v.inversion ? v.ventasMeta / v.inversion : null;
+        let senal = `<span class="chip chip-ok">Sin datos</span>`;
+        if (k === "otro") senal = `<span class="chip chip-ok">Renombrar para clasificar</span>`;
+        else if (roas != null && roasMeta) {
+          if (roas >= roasMeta * 1.2) senal = `<span class="chip chip-green">Escalar</span>`;
+          else if (roas <= roasMeta * 0.7) senal = `<span class="chip chip-low">Revisar</span>`;
+          else senal = `<span class="chip chip-amber">Mantener</span>`;
+        }
+        const venta = k.startsWith("cat_") ? fmtMoney(ventaCategoria(nombreDesglose(k), r.desde, r.hasta)) : "—";
+        return `<tr class="border-t border-slate-100"><td class="px-4 py-2.5 font-semibold">${esc(nombreDesglose(k))}</td><td class="px-4 py-2.5 text-right">${fmtMoney(v.inversion)}</td><td class="px-4 py-2.5 text-right text-slate-500">${fmtMoney(v.ventasMeta)}</td><td class="px-4 py-2.5 text-right font-bold">${fmtRoas(roas)}</td><td class="px-4 py-2.5 text-right">${venta}</td><td class="px-4 py-2.5">${senal}</td></tr>`;
+      }).join("") : `<tr><td colspan="6" class="px-4 py-4 text-slate-400">Sin inversión en el período.</td></tr>`;
+
+      // Anuncios
+      const ads = Object.values(meta.anuncios || {}).map(ad => {
+        let i = 0, v = 0;
+        Object.entries(ad.porDia || {}).forEach(([f, d]) => { if (enRango(f, r.desde, r.hasta)) { i += n(d.i); v += n(d.v); } });
+        return { ...ad, inv: i, ven: v };
+      }).filter(ad => ad.inv > 0).sort((x, y) => y.inv - x.inv).slice(0, 12);
+      document.getElementById("mkAnuncios").innerHTML = ads.length ? ads.map(ad => {
+        const roas = ad.inv ? ad.ven / ad.inv : null;
+        const img = ad.miniatura ? `<img src="${esc(ad.miniatura)}" alt="" loading="lazy" class="w-12 h-12 rounded-lg object-cover bg-slate-100 shrink-0" onerror="this.style.visibility='hidden'">` : `<div class="w-12 h-12 rounded-lg bg-slate-100 shrink-0"></div>`;
+        return `<tr class="border-t border-slate-100"><td class="px-4 py-2"><div class="flex items-center gap-3">${img}<div class="min-w-0"><div class="font-semibold truncate max-w-[280px]" title="${esc(ad.anuncio)}">${esc(ad.anuncio)}</div><div class="text-xs text-slate-400 truncate max-w-[280px]" title="${esc(ad.campania)}">${esc(ad.campania)}</div></div></div></td><td class="px-4 py-2 text-xs">${esc(nombreDesglose(ad.desglose === "categoria" && ad.categoria ? "cat_" + ad.categoria : ad.desglose))}</td><td class="px-4 py-2 text-right">${fmtMoney(ad.inv)}</td><td class="px-4 py-2 text-right text-slate-500">${fmtMoney(ad.ven)}</td><td class="px-4 py-2 text-right font-bold">${fmtRoas(roas)}</td></tr>`;
+      }).join("") : `<tr><td colspan="5" class="px-4 py-4 text-slate-400">Sin anuncios con inversión en el período.</td></tr>`;
+    }
+
+    function renderInstagram() {
+      const ig = mk.instagram;
+      const kp = document.getElementById("mkIgKpis");
+      if (!ig) { kp.innerHTML = `<div class="card p-5 col-span-2 md:col-span-4 text-sm text-slate-500">Todavía no hay datos de Instagram.</div>`; document.getElementById("mkIgPosts").innerHTML = ""; document.getElementById("mkIgOrden").innerHTML = ""; return; }
+      const u = ig.ultimos30 || {};
+      kp.innerHTML =
+        kpi("👥 Seguidores", fmtNum(ig.seguidores), "@" + esc(ig.usuario)) +
+        kpi("📡 Alcance", fmtNum(u.alcance), "Últimos 30 días") +
+        kpi("👤 Visitas al perfil", fmtNum(u.visitasPerfil), "Últimos 30 días", true) +
+        kpi("🔗 Clics a la web", fmtNum(u.clicsWeb), "Últimos 30 días");
+      const ord = document.getElementById("mkIgOrden");
+      ord.innerHTML = `<span class="mr-1">Ordenar por:</span>` + IG_ORDEN.map(([k, l]) => `<button class="pill ${k === mkIgOrden ? "active" : ""}" data-igord="${k}">${l}</button>`).join("");
+      ord.querySelectorAll("[data-igord]").forEach(b => (b.onclick = () => { mkIgOrden = b.dataset.igord; renderInstagram(); }));
+      const posts = (ig.publicaciones || []).slice().sort((a, b) => mkIgOrden === "fecha" ? String(b.fecha).localeCompare(String(a.fecha)) : n(b[mkIgOrden]) - n(a[mkIgOrden]));
+      const cel = v => (v == null ? "—" : fmtNum(v));
+      document.getElementById("mkIgPosts").innerHTML = posts.length ? posts.map(p => {
+        const img = p.miniatura ? `<img src="${esc(p.miniatura)}" alt="" loading="lazy" class="w-12 h-16 rounded-lg object-cover bg-slate-100 shrink-0" onerror="this.style.visibility='hidden'">` : `<div class="w-12 h-16 rounded-lg bg-slate-100 shrink-0"></div>`;
+        const texto = esc((p.texto || "Sin texto").split("\n")[0]);
+        const titulo = p.link ? `<a href="${esc(p.link)}" target="_blank" rel="noopener" class="font-semibold hover:underline">${texto}</a>` : `<span class="font-semibold">${texto}</span>`;
+        return `<tr class="border-t border-slate-100"><td class="px-4 py-2"><div class="flex items-center gap-3">${img}<div class="min-w-0"><div class="truncate max-w-[300px]">${titulo}</div><div class="text-xs text-slate-400">${p.fecha ? new Date(p.fecha).toLocaleDateString("es-AR") : ""}</div></div></div></td><td class="px-4 py-2"><span class="chip chip-ok">${esc(p.tipo)}</span></td><td class="px-4 py-2 text-right">${cel(p.alcance)}</td><td class="px-4 py-2 text-right">${cel(p.guardados)}</td><td class="px-4 py-2 text-right">${cel(p.compartidos)}</td><td class="px-4 py-2 text-right font-bold">${cel(p.visitasPerfil)}</td></tr>`;
+      }).join("") : `<tr><td colspan="6" class="px-4 py-4 text-slate-400">Sin publicaciones.</td></tr>`;
+    }
+
+    function renderClientas() {
+      const c = mk.clientas;
+      const cont = document.getElementById("mkGrupos");
+      if (!c) { cont.innerHTML = `<div class="card p-5 col-span-2 md:col-span-5 text-sm text-slate-500">Todavía no hay datos de clientas.</div>`; document.getElementById("mkClientasKpis").innerHTML = ""; return; }
+      const rg = c.reglas || {};
+      const G = [
+        ["nuevas", "🌱 Nuevas", `Una sola compra, hace ${rg.activaHasta || 60} días o menos`, "Bienvenida en Perfit y segunda compra"],
+        ["recompran", "🔁 Recompran", `2 compras o más, la última hace ${rg.activaHasta || 60} días o menos`, "Mostrarles lo nuevo y la categoría que compran"],
+        ["fieles", "💎 Fieles", `${rg.fielMinCompras || 4} compras o más en el último año y activas`, "Base para públicos similares en Meta"],
+        ["enfriandose", "🧊 Enfriándose", `Última compra hace ${(rg.activaHasta || 60) + 1} a ${rg.enfriandoHasta || 120} días`, "Reactivación en Perfit antes de perderlas"],
+        ["perdidas", "💤 Perdidas", `Sin compras hace más de ${rg.enfriandoHasta || 120} días`, "Excluir de la pauta de clientas activas"],
+      ];
+      const total = c.total || 0;
+      cont.innerHTML = G.map(([k, t, regla, sug]) => {
+        const v = (c.grupos || {})[k] || 0;
+        return `<div class="card p-5 flex flex-col gap-1.5"><div class="flex items-center justify-between gap-2"><div class="text-sm font-bold">${t}</div><div class="text-xs text-slate-500">${total ? Math.round((v / total) * 100) : 0}%</div></div><div class="text-2xl font-bold">${fmtNum(v)}</div><div class="text-xs text-slate-500 leading-snug">${regla}</div><div class="text-xs text-indigo-700 font-semibold leading-snug mt-auto pt-1">→ ${sug}</div></div>`;
+      }).join("");
+      document.getElementById("mkClientasKpis").innerHTML =
+        kpi("🔁 Tasa de recompra", fmtPct(c.tasaRecompra90), `Volvieron a comprar dentro de los 90 días (de ${fmtNum(c.cohorteRecompra)} clientas que compraron por primera vez hace 3 a 6 meses)`) +
+        kpi("⏱️ Días hasta la 2.ª compra", c.medianaDiasSegundaCompra == null ? "—" : fmtNum(c.medianaDiasSegundaCompra), "Mediana, entre las que volvieron") +
+        kpi("💰 Valor por clienta en el año", fmtMoney(c.valorClientaAnio), `Promedio de ${fmtNum(c.clientasUltimoAnio)} clientas que compraron en los últimos 12 meses`, true);
+      document.getElementById("mkClientasNota").textContent = `${fmtNum(total)} clientas con pedidos pagados en la web en los últimos ${rg.historialDias || 400} días. Solo cuenta la tienda online; el local no entra.`;
+    }
+
+    function renderMarketing() {
+      if (!mk) return;
+      const pills = document.getElementById("mkPills");
+      pills.innerHTML = MK_PERIODOS.map(p => `<button class="pill ${p.key === mkPeriodo ? "active" : ""}" data-mkp="${p.key}">${p.label}</button>`).join("");
+      pills.querySelectorAll("[data-mkp]").forEach(b => (b.onclick = () => { mkPeriodo = b.dataset.mkp; renderMarketing(); }));
+      const est = mk.estado || {};
+      const errores = Object.entries(est.errores || {}).filter(([, e]) => e);
+      const hs = est.actualizado ? (Date.now() - new Date(est.actualizado).getTime()) / 3600000 : null;
+      document.getElementById("mkEstado").innerHTML = (est.actualizado ? "Actualizado: " + new Date(est.actualizado).toLocaleString("es-AR") + " · se actualiza solo una vez por día" : "Sin actualizar todavía") +
+        (hs != null && hs > 30 ? ` <span style="color:#b45309;font-weight:600">· ⚠️ hace ${Math.floor(hs)} h, revisar el sync en GitHub</span>` : "") +
+        errores.map(([f, e]) => `<br><span style="color:#b91c1c;font-weight:600">⚠️ ${esc(f)}: ${esc(e)}</span>`).join("");
+      const r = rango(mkPeriodo);
+      try { renderPauta(r); } catch (e) { console.error(e); }
+      try { renderInstagram(); } catch (e) { console.error(e); }
+      try { renderClientas(); } catch (e) { console.error(e); }
+    }
+
+    db.ref("dashboard_marketing").on("value", snap => { mk = snap.val() || {}; renderMarketing(); }, err => {
+      document.getElementById("mkEstado").innerHTML = `<span style="color:#b91c1c;font-weight:600">No se pudieron leer los datos (${esc(err.message)}). Falta agregar la regla de lectura de "dashboard_marketing" en Firebase.</span>`;
+    });
+  })();
 </script>
 
 </body>
