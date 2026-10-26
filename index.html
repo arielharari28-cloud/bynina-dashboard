@@ -51,6 +51,7 @@
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
     <div class="navitem" data-view="marketing">📣 Pauta y clientas</div>
+    <div class="navitem" data-view="clientas">👥 Clientas</div>
     <div class="text-[10px] font-semibold text-slate-400 uppercase tracking-widest px-3 pt-4 pb-1">Configuración</div>
     <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadge" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:auto"></span></div>
   </nav>
@@ -66,6 +67,7 @@
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
     <div class="navitem" data-view="marketing">📣 Pauta y clientas</div>
+    <div class="navitem" data-view="clientas">👥 Clientas</div>
     <div class="navitem" data-view="clasificar">🏷️ Clasificar <span id="clasifBadgeM" class="chip" style="display:none;background:#dc2626;color:#fff;margin-left:4px"></span></div>
   </nav>
 
@@ -449,6 +451,13 @@
       <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4" id="mkGrupos"></div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-2" id="mkClientasKpis"></div>
       <p class="text-xs text-slate-500 mb-6" id="mkClientasNota"></p>
+    </div>
+
+    <!-- ===================== CONOCER A MIS CLIENTAS ===================== -->
+    <div class="view" data-view="clientas">
+      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">👥 Conocer a mis clientas</h1>
+      <p id="clEstado" class="text-xs text-slate-400 mt-0.5 mb-5">Cargando...</p>
+      <div id="clContenido" class="space-y-8"></div>
     </div>
 
     <div class="view" data-view="ganadores">
@@ -3427,6 +3436,160 @@
 
     db.ref("dashboard_marketing").on("value", snap => { mk = snap.val() || {}; renderMarketing(); }, err => {
       document.getElementById("mkEstado").innerHTML = `<span style="color:#b91c1c;font-weight:600">No se pudieron leer los datos (${esc(err.message)}). Falta agregar la regla de lectura de "dashboard_marketing" en Firebase.</span>`;
+    });
+  })();
+</script>
+
+<script>
+  // ================= Conocer a mis clientas (oct 2026) =================
+  // Lee "dashboard_marketing": perfil (Tienda Nube), meta.porDiaEdad/porDiaGenero (pauta)
+  // e instagram.demografia (seguidoras). Todo son totales: ningún dato personal.
+  (function () {
+    let mk = null;
+    let clDiasMeta = 30;
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const n = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    const pct = (v, d = 0) => (v == null || !isFinite(v) ? "—" : (v * 100).toLocaleString("es-AR", { maximumFractionDigits: d }) + "%");
+    const mil = v => (v == null ? "—" : "$" + Math.round(n(v) / 1000).toLocaleString("es-AR") + " mil");
+    const millones = v => (v == null ? "—" : n(v) >= 1e6 ? "$" + (n(v) / 1e6).toLocaleString("es-AR", { maximumFractionDigits: 1 }) + " M" : mil(v));
+    const fechaAR = d => new Date(new Date(d).getTime() - 3 * 3600000).toISOString().slice(0, 10);
+    const sumarDias = (f, k) => { const d = new Date(f + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); };
+
+    const titulo = t => `<div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">${t}</div>`;
+    const card = (inner, extra = "") => `<div class="card p-5 ${extra}">${inner}</div>`;
+    const kpi = (t, v, sub, dest) => `<div class="card p-5 ${dest ? "border-indigo-200 bg-indigo-50" : ""}"><div class="text-xs font-semibold ${dest ? "text-indigo-500" : "text-slate-500"} mb-2">${t}</div><div class="text-2xl font-bold ${dest ? "text-indigo-700" : ""}">${v}</div><div class="text-xs mt-1 text-slate-500">${sub || ""}</div></div>`;
+    const barra = (p, color = "#6366f1", alto = 8) => `<div style="height:${alto}px;border-radius:999px;background:#f1f5f9;overflow:hidden;flex:1;min-width:40px"><div style="height:100%;border-radius:999px;background:${color};width:${Math.max(0, Math.min(100, p)).toFixed(1)}%"></div></div>`;
+    const sinDatos = msg => `<div class="text-sm text-slate-400">${msg || "Todavía no hay datos. Corré el sync de Pauta, Instagram y Clientas."}</div>`;
+    // Lista con barra: filas [{nombre, valor (número para la barra), etiqueta}]
+    function listaBarras(filas, color) {
+      if (!filas || !filas.length) return sinDatos("Sin datos.");
+      const max = Math.max(...filas.map(f => n(f.valor)), 1);
+      return `<div class="space-y-2">${filas.map(f => `<div><div class="flex justify-between gap-3 text-sm"><span class="truncate">${f.nombre}</span><strong class="whitespace-nowrap">${f.etiqueta}</strong></div><div class="flex mt-1">${barra(n(f.valor) / max * 100, color, 6)}</div></div>`).join("")}</div>`;
+    }
+    function repartir(arr, campo) { const t = (arr || []).reduce((s, x) => s + n(x[campo]), 0); return t; }
+
+    function seccionResumen(p) {
+      return `<div class="grid grid-cols-2 md:grid-cols-4 gap-4">${
+        kpi("👥 Clientas", n(p.clientas).toLocaleString("es-AR"), "Con al menos un pedido pagado") +
+        kpi("🛒 Pedidos", n(p.pedidos).toLocaleString("es-AR"), p.clientas ? (p.pedidos / p.clientas).toLocaleString("es-AR", { maximumFractionDigits: 1 }) + " pedidos por clienta" : "") +
+        kpi("🏷️ Ticket promedio", p.ticketPromedio == null ? "—" : "$" + n(p.ticketPromedio).toLocaleString("es-AR"), "Sin envío") +
+        kpi("👕 Prendas por pedido", p.unidadesPorPedido == null ? "—" : n(p.unidadesPorPedido).toLocaleString("es-AR"), "Promedio")
+      }</div>`;
+    }
+
+    function seccionZona(p) {
+      const z = p.zona || {};
+      const totReg = repartir(z.regiones, "facturacion");
+      const orden = ["GBA", "CABA", "Interior", "Sin dato"];
+      const regiones = (z.regiones || []).slice().sort((a, b) => orden.indexOf(a.nombre) - orden.indexOf(b.nombre));
+      const regHtml = regiones.map(r => card(`<div class="flex justify-between items-baseline"><div class="font-bold">${esc(r.nombre)}</div><div class="text-2xl font-bold text-indigo-700">${pct(totReg ? r.facturacion / totReg : 0)}</div></div><div class="flex my-2">${barra(totReg ? r.facturacion / totReg * 100 : 0)}</div><div class="text-xs text-slate-500">${n(r.clientas).toLocaleString("es-AR")} clientas · ticket ${mil(r.pedidos ? r.facturacion / r.pedidos : null)}</div>`)).join("");
+      const prov = (z.provincias || []).slice(0, 12).map(r => `<tr class="border-t border-slate-100"><td class="px-4 py-2 font-semibold">${esc(r.nombre)}</td><td class="px-3 py-2 text-right">${n(r.clientas).toLocaleString("es-AR")}</td><td class="px-3 py-2 text-right">${millones(r.facturacion)}</td><td class="px-4 py-2 text-right">${mil(r.pedidos ? r.facturacion / r.pedidos : null)}</td></tr>`).join("");
+      const ciudades = (z.ciudades || []).slice(0, 10).map(c => ({ nombre: `<strong>${esc(c.nombre)}</strong> <span class="text-slate-400">${esc(c.provincia)}</span>`, valor: c.facturacion, etiqueta: millones(c.facturacion) }));
+      return titulo("De dónde son") +
+        `<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">${regHtml || sinDatos()}</div>` +
+        `<div class="grid grid-cols-1 md:grid-cols-2 gap-4">` +
+        `<div class="card overflow-x-auto"><div class="font-bold text-sm px-4 pt-4 pb-1">Provincias</div><table class="w-full text-sm min-w-[400px]"><thead><tr class="text-left text-xs text-slate-500"><th class="px-4 py-2 font-semibold">Provincia</th><th class="px-3 py-2 font-semibold text-right">Clientas</th><th class="px-3 py-2 font-semibold text-right">Facturación</th><th class="px-4 py-2 font-semibold text-right">Ticket</th></tr></thead><tbody>${prov}</tbody></table></div>` +
+        card(`<div class="font-bold text-sm mb-3">Ciudades que más compran</div>${listaBarras(ciudades)}`) +
+        `</div><p class="text-xs text-slate-500 mt-2">CABA y GBA se separan del interior por código postal: es una aproximación.</p>`;
+    }
+
+    function seccionEdad() {
+      const meta = mk.meta || {}; const ig = (mk.instagram && mk.instagram.demografia) || {};
+      const hoy = fechaAR(new Date()); const desde = sumarDias(hoy, -clDiasMeta), hasta = sumarDias(hoy, -1);
+      const acc = {}; const accG = {};
+      Object.entries(meta.porDiaEdad || {}).forEach(([f, d]) => { if (f < desde || f > hasta) return; Object.entries(d || {}).forEach(([k, v]) => { const e = acc[k] || (acc[k] = { i: 0, v: 0 }); e.i += n(v.i); e.v += n(v.v); }); });
+      Object.entries(meta.porDiaGenero || {}).forEach(([f, d]) => { if (f < desde || f > hasta) return; Object.entries(d || {}).forEach(([k, v]) => { const e = accG[k] || (accG[k] = { i: 0, v: 0 }); e.i += n(v.i); e.v += n(v.v); }); });
+      const seg = {}; (ig.edad || []).forEach(x => (seg[x.nombre] = n(x.valor)));
+      const rangos = Array.from(new Set([...Object.keys(acc), ...Object.keys(seg)])).filter(r => r !== "unknown" && r !== "Sin dato").sort();
+      const tI = Object.values(acc).reduce((s, x) => s + x.i, 0), tV = Object.values(acc).reduce((s, x) => s + x.v, 0), tS = Object.values(seg).reduce((s, x) => s + x, 0);
+      const pegs = rangos.map(r => ({ r, s: tS ? (seg[r] || 0) / tS : null, i: tI ? ((acc[r] || {}).i || 0) / tI : null, v: tV ? ((acc[r] || {}).v || 0) / tV : null, roas: acc[r] && acc[r].i ? acc[r].v / acc[r].i : null }));
+      const maxP = Math.max(0.01, ...pegs.flatMap(x => [x.s || 0, x.i || 0, x.v || 0]));
+      const roasProm = tI ? tV / tI : null;
+      const fila = (p, color, val, fuerte) => `<div class="flex items-center gap-2">${barra(p == null ? 0 : p / maxP * 100, color, 8)}<span class="w-10 text-right text-[11px] ${fuerte ? "font-bold text-indigo-900" : "text-slate-500"}">${p == null ? "—" : pct(p)}</span></div>`;
+      const filas = pegs.map(x => {
+        const color = x.roas == null || !roasProm ? "#0f172a" : x.roas >= roasProm * 1.2 ? "#15803d" : x.roas <= roasProm * 0.8 ? "#b91c1c" : "#0f172a";
+        return `<div class="grid items-center gap-3" style="grid-template-columns:56px 1fr 80px"><strong class="text-sm">${esc(x.r)}</strong><div class="space-y-1">${fila(x.s, "#cbd5e1")}${fila(x.i, "#a5b4fc")}${fila(x.v, "#4338ca", true)}</div><div class="text-right"><div class="text-[11px] text-slate-500">ROAS</div><div class="text-base font-bold" style="color:${color}">${x.roas == null ? "—" : x.roas.toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}</div></div></div>`;
+      }).join("");
+      const ley = (c, t) => `<span class="flex items-center gap-1.5"><span style="width:12px;height:12px;border-radius:3px;background:${c}"></span>${t}</span>`;
+      const pills = [30, 90].map(d => `<button class="pill ${d === clDiasMeta ? "active" : ""}" data-cldias="${d}">Pauta ${d} días</button>`).join("");
+      const mujeresSeg = (ig.genero || []).find(g => g.nombre === "Mujeres");
+      const totSegG = (ig.genero || []).reduce((s, g) => s + n(g.valor), 0);
+      const totGV = Object.values(accG).reduce((s, x) => s + x.v, 0), totGI = Object.values(accG).reduce((s, x) => s + x.i, 0);
+      const genHtml = `<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">${
+        kpi("Seguidoras mujeres", mujeresSeg && totSegG ? pct(n(mujeresSeg.valor) / totSegG) : "—", "De tus seguidoras de Instagram") +
+        kpi("Ventas de la pauta a mujeres", accG.Mujeres && totGV ? pct(accG.Mujeres.v / totGV) : "—", accG.Mujeres && totGI ? `Con el ${pct(accG.Mujeres.i / totGI)} de la inversión` : "")
+      }</div>`;
+      const avisoIg = ig.edad ? "" : `<p class="text-xs text-amber-700 mt-2">Instagram no devolvió la edad de las seguidoras (puede pedir un mínimo de seguidoras o haber cambiado la forma de pedirlo).</p>`;
+      return titulo("Edad") + card(
+        `<div class="flex flex-wrap gap-3 items-center justify-between mb-4"><div class="font-bold text-sm">Quién te sigue, en quién invertís y quién compra</div><div class="flex flex-wrap gap-1.5">${pills}</div></div>` +
+        `<div class="flex flex-wrap gap-4 text-xs text-slate-600 mb-4">${ley("#cbd5e1", "Seguidoras de Instagram")}${ley("#a5b4fc", "Inversión en pauta")}${ley("#4338ca", "Ventas de la pauta")}</div>` +
+        `<div class="overflow-x-auto"><div class="space-y-3 min-w-[520px]">${filas || sinDatos("Todavía no hay datos de edad.")}</div></div>` +
+        `<p class="text-xs text-slate-500 mt-4">Porcentaje de cada rango sobre el total. ROAS en verde: ese rango rinde bastante más que el promedio de la cuenta; en rojo, bastante menos. Las ventas son las que Meta atribuye a la pauta, no todas las de la tienda.</p>${avisoIg}`) + genHtml;
+    }
+
+    function seccionCompran(p) {
+      const c = p.compran || {};
+      const talles = (c.talles || []).filter(t => t.talle !== "Sin talle").slice(0, 10).map(t => ({ nombre: `<strong>${esc(t.talle)}</strong>`, valor: t.unidades, etiqueta: pct(t.pct) }));
+      const sinTalle = (c.talles || []).find(t => t.talle === "Sin talle");
+      const cats = (c.categorias || []).slice(0, 10).map(x => ({ nombre: esc(x.categoria), valor: x.facturacion, etiqueta: millones(x.facturacion) }));
+      const pares = (lista, unidad) => (lista || []).slice(0, 6).map(x => `<div class="flex justify-between gap-3 text-sm py-1.5 border-t border-slate-100"><span><strong>${esc(x.a)}</strong> + <strong>${esc(x.b)}</strong></span><span class="text-indigo-700 font-bold whitespace-nowrap">${n(x.pedidos).toLocaleString("es-AR")} ${unidad}</span></div>`).join("") || sinDatos("Sin datos.");
+      return titulo("Qué compran") +
+        `<div class="grid grid-cols-1 md:grid-cols-3 gap-4">` +
+        card(`<div class="font-bold text-sm mb-3">Talles más pedidos</div>${listaBarras(talles)}${sinTalle && sinTalle.pct > 0.15 ? `<p class="text-xs text-amber-700 mt-3">El ${pct(sinTalle.pct)} de las prendas no tiene un talle reconocible (talles con otro nombre).</p>` : ""}`) +
+        card(`<div class="font-bold text-sm mb-3">Categorías por facturación</div>${listaBarras(cats, "#818cf8")}`) +
+        card(`<div class="font-bold text-sm mb-1">Se compran juntas</div><p class="text-xs text-slate-500 mb-2">Pedidos que llevan las dos cosas. Sirve para armar looks y combos.</p>${pares(c.paresCategorias, "pedidos")}<div class="font-bold text-xs text-slate-500 mt-4 mb-1">Prendas puntuales</div>${pares(c.paresProductos, "pedidos")}`) +
+        `</div>`;
+    }
+
+    function seccionComo(p) {
+      const c = p.comoCompran || {};
+      const PAGOS = { "credit card": "Tarjeta de crédito", "debit card": "Tarjeta de débito", "transfer": "Transferencia", "wire transfer": "Transferencia", "bank transfer": "Transferencia", "cash": "Efectivo", "ticket": "Efectivo (cupón)", "boleto": "Efectivo (cupón)", "mercadopago": "Mercado Pago", "mercado pago": "Mercado Pago", "custom": "Otro (manual)", "account money": "Dinero en Mercado Pago", "wallet": "Billetera virtual" };
+      const nombrePago = s => PAGOS[String(s || "").toLowerCase().trim()] || s;
+      const lista = (arr, campoNombre) => { const t = repartir(arr, "pedidos"); return (arr || []).map(x => ({ nombre: esc(campoNombre === "medio" ? nombrePago(x[campoNombre]) : x[campoNombre]), valor: x.pedidos, etiqueta: pct(t ? x.pedidos / t : 0) })); };
+      const tickets = lista(c.tickets, "rango");
+      const dh = c.diaHora || [];
+      const max = Math.max(1, ...dh.flat());
+      const dias = [[1, "Lun"], [2, "Mar"], [3, "Mié"], [4, "Jue"], [5, "Vie"], [6, "Sáb"], [0, "Dom"]];
+      const cab = `<div class="grid gap-[3px] text-[10px] text-slate-400" style="grid-template-columns:40px repeat(24,minmax(0,1fr))"><span></span>${Array.from({ length: 24 }, (_, h) => `<span class="text-center">${h % 3 === 0 ? h : ""}</span>`).join("")}</div>`;
+      const calor = dh.length ? cab + dias.map(([i, nom]) => `<div class="grid gap-[3px] items-center" style="grid-template-columns:40px repeat(24,minmax(0,1fr))"><span class="text-xs font-semibold text-slate-600">${nom}</span>${(dh[i] || []).map((v, h) => `<div title="${nom} ${h} h: ${v} pedidos" style="height:20px;border-radius:4px;background:rgba(79,70,229,${(0.05 + 0.95 * v / max).toFixed(2)})"></div>`).join("")}</div>`).join("") : sinDatos("Sin datos.");
+      return titulo("Cómo compran") +
+        `<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">` +
+        card(`<div class="font-bold text-sm mb-3">Medio de pago</div>${listaBarras(lista(c.pagos, "medio"))}`) +
+        card(`<div class="font-bold text-sm mb-3">Cuotas</div>${listaBarras(lista(c.cuotas, "cuotas"))}`) +
+        card(`<div class="font-bold text-sm mb-3">Envío</div>${listaBarras(lista(c.envios, "envio"))}`) +
+        card(`<div class="font-bold text-sm mb-3">Ticket por pedido</div>${listaBarras(tickets)}`) +
+        `</div>` +
+        card(`<div class="font-bold text-sm mb-1">Cuándo compran</div><p class="text-xs text-slate-500 mb-3">Pedidos por día y hora (Argentina). Más oscuro, más pedidos. Sirve para programar la pauta y los envíos de Perfit.</p><div class="overflow-x-auto"><div class="space-y-[3px] min-w-[620px]">${calor}</div></div>`);
+    }
+
+    function seccionValor(p) {
+      const v = p.valor || {};
+      const entrada = (v.entrada || []).slice().sort((a, b) => b.tasaVuelta - a.tasaVuelta);
+      const maxT = Math.max(0.01, ...entrada.map(e => e.tasaVuelta));
+      const filas = entrada.map(e => `<tr class="border-t border-slate-100"><td class="px-4 py-2 font-semibold">${esc(e.categoria)}</td><td class="px-3 py-2 text-right">${n(e.clientas).toLocaleString("es-AR")}</td><td class="px-3 py-2 text-right">${mil(e.ticketPrimera)}</td><td class="px-4 py-2"><div class="flex items-center gap-2">${barra(e.tasaVuelta / maxT * 100, "#16a34a", 8)}<strong class="w-10 text-right">${pct(e.tasaVuelta)}</strong></div></td></tr>`).join("");
+      return titulo("Cuánto valen") +
+        `<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">` +
+        `<div class="card p-5 border-indigo-200 bg-indigo-50 md:col-span-2"><div class="text-xs font-semibold text-indigo-500 mb-2">Concentración</div><div class="text-xl md:text-2xl font-bold text-indigo-800 leading-snug">El ${pct(v.pctClientas80)} de tus clientas hace el 80% de la facturación</div><div class="text-xs text-indigo-600 mt-1">Y el ${pct(v.pctClientas50)} hace la mitad.</div></div>` +
+        kpi("Tu mejor 10%", pct(v.pctFacturacionTop10), "de la facturación viene del 10% de clientas que más compra") +
+        `</div>` +
+        `<div class="card overflow-x-auto"><div class="font-bold text-sm px-4 pt-4">Con qué entran y cuántas vuelven</div><p class="text-xs text-slate-500 px-4 pb-2">Categoría de la primera compra y qué parte vuelve a comprar dentro de los 90 días. Solo categorías con 15 clientas o más.</p><table class="w-full text-sm min-w-[520px]"><thead><tr class="text-left text-xs text-slate-500"><th class="px-4 py-2 font-semibold">Primera compra</th><th class="px-3 py-2 font-semibold text-right">Clientas</th><th class="px-3 py-2 font-semibold text-right">Ticket 1.ª compra</th><th class="px-4 py-2 font-semibold">Vuelven</th></tr></thead><tbody>${filas || `<tr><td colspan="4" class="px-4 py-3">${sinDatos("Sin datos.")}</td></tr>`}</tbody></table></div>`;
+    }
+
+    function renderClientasTab() {
+      const cont = document.getElementById("clContenido");
+      const est = mk && mk.estado;
+      document.getElementById("clEstado").textContent = (est && est.actualizado ? "Actualizado: " + new Date(est.actualizado).toLocaleString("es-AR") + " · " : "") + "Pedidos pagados de la web, últimos 400 días. Solo totales, sin datos personales.";
+      const p = mk && mk.perfil;
+      if (!p) { cont.innerHTML = card(sinDatos("Todavía no hay datos del perfil de clientas. Corré en GitHub Actions el sync \"Sync Pauta, Instagram y Clientas\" con la versión nueva.")); return; }
+      const partes = [seccionResumen, seccionZona, seccionEdad, seccionCompran, seccionComo, seccionValor].map(f => {
+        try { return `<section>${f(p)}</section>`; } catch (e) { console.error(e); return ""; }
+      });
+      cont.innerHTML = partes.join("");
+      cont.querySelectorAll("[data-cldias]").forEach(b => (b.onclick = () => { clDiasMeta = Number(b.dataset.cldias); renderClientasTab(); }));
+    }
+
+    db.ref("dashboard_marketing").on("value", snap => { mk = snap.val() || {}; renderClientasTab(); }, err => {
+      document.getElementById("clEstado").textContent = "No se pudieron leer los datos: " + err.message;
     });
   })();
 </script>
