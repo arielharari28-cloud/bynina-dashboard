@@ -201,22 +201,22 @@ async function syncMeta() {
     });
   }
 
-  // Miniaturas de los anuncios con inversión en los últimos 30 días (de a 50 por pedido)
+  // Miniaturas de los anuncios con inversión en los últimos 30 días.
+  // Se piden de a una (Meta dio de baja el pedido en lote con ?ids=), 5 en paralelo.
   const desde30 = sumarDias(hasta, -30);
   const conGasto = Object.values(anuncios).filter((a) =>
     Object.entries(a.porDia).some(([f, v]) => f >= desde30 && v.i > 0)).map((a) => a.id);
-  for (let i = 0; i < conGasto.length; i += 50) {
-    const lote = conGasto.slice(i, i + 50);
-    try {
-      const res = await graphGet("/", { ids: lote.join(","), fields: "creative{thumbnail_url,image_url}" });
-      lote.forEach((id) => {
-        const cr = res[id] && res[id].creative;
-        if (cr) anuncios[id].miniatura = cr.thumbnail_url || cr.image_url || null;
-      });
-    } catch (err) {
-      console.warn(`Meta: no se pudieron traer miniaturas (${err.message})`);
-    }
+  let miniOk = 0; let miniError = null;
+  for (let i = 0; i < conGasto.length; i += 5) {
+    await Promise.all(conGasto.slice(i, i + 5).map(async (id) => {
+      try {
+        const r = await graphGet(`/${id}`, { fields: "creative{thumbnail_url,image_url}" });
+        const cr = r.creative;
+        if (cr && (cr.thumbnail_url || cr.image_url)) { anuncios[id].miniatura = cr.thumbnail_url || cr.image_url; miniOk += 1; }
+      } catch (err) { miniError = err.message; }
+    }));
   }
+  console.log(`Meta: miniaturas ${miniOk}/${conGasto.length}${miniError ? ` (último error: ${miniError})` : ""}`);
 
   // Solo se guardan anuncios que tuvieron inversión en el período
   const anunciosOut = {};
