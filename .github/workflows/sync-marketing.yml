@@ -1,0 +1,34 @@
+name: Sync Pauta, Instagram y Clientas
+
+on:
+  schedule:
+    # Todos los días 05:47 de Buenos Aires (08:47 UTC)
+    - cron: "47 8 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Instalar dependencias
+        run: npm install --omit=dev
+
+      - name: Ejecutar sync de pauta, Instagram y clientas
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          META_AD_ACCOUNT_IDS: ${{ secrets.META_AD_ACCOUNT_IDS }}
+          TN_STORE_ID: ${{ secrets.TN_STORE_ID }}
+          TN_ACCESS_TOKEN: ${{ secrets.TN_ACCESS_TOKEN }}
+          FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node scripts/sync-marketing.js
