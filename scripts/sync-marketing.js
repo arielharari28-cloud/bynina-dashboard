@@ -53,6 +53,8 @@ const CATEGORIA_CLAVES = [
 ];
 // ==============================================
 
+const GENEROS = { female: "Mujeres", male: "Hombres", unknown: "Sin dato" };
+
 const META_TOKEN = process.env.META_ACCESS_TOKEN;
 const META_APP_SECRET = process.env.META_APP_SECRET || "";
 const TN_STORE_ID = process.env.TN_STORE_ID;
@@ -164,6 +166,8 @@ async function syncMeta() {
   const porDia = {};        // fecha → { inversion, ventasMeta, compras, clics, impresiones }
   const porDiaDesglose = {}; // fecha → desglose → { inversion, ventasMeta, compras }
   const anuncios = {};       // adId → info + porDia
+  const porDiaEdad = {};     // fecha → rango de edad → { i, v, c }
+  const porDiaGenero = {};   // fecha → género → { i, v, c }
   const cuentasOut = [];
 
   for (const c of cuentas) {
@@ -176,6 +180,35 @@ async function syncMeta() {
       limit: 500,
     });
     console.log(`Meta: ${c.name} → ${filas.length} filas de anuncio por día`);
+
+    // Edad y género: a nivel cuenta, por día. Si falla, el resto de Meta se guarda igual.
+    try {
+      const filasEG = await graphTodas(`/${c.id}/insights`, {
+        level: "account",
+        time_increment: 1,
+        time_range: { since: desde, until: hasta },
+        breakdowns: "age,gender",
+        fields: "date_start,spend,actions,action_values",
+        limit: 500,
+      });
+      filasEG.forEach((f) => {
+        const fecha = f.date_start;
+        const inv = num(f.spend);
+        const ven = valorAccion(f.action_values, TIPOS_COMPRA);
+        const com = valorAccion(f.actions, TIPOS_COMPRA);
+        const edad = claveFB(f.age || "unknown");
+        const genero = GENEROS[f.gender] || "Sin dato";
+        const de = porDiaEdad[fecha] || (porDiaEdad[fecha] = {});
+        const e1 = de[edad] || (de[edad] = { i: 0, v: 0, c: 0 });
+        e1.i += inv; e1.v += ven; e1.c += com;
+        const dg = porDiaGenero[fecha] || (porDiaGenero[fecha] = {});
+        const e2 = dg[genero] || (dg[genero] = { i: 0, v: 0, c: 0 });
+        e2.i += inv; e2.v += ven; e2.c += com;
+      });
+      console.log(`Meta: ${c.name} → ${filasEG.length} filas por edad y género`);
+    } catch (err) {
+      console.warn(`Meta: no se pudo traer edad y género (${err.message})`);
+    }
 
     filas.forEach((f) => {
       const fecha = f.date_start;
@@ -227,6 +260,9 @@ async function syncMeta() {
   Object.values(porDiaDesglose).forEach((dd) => Object.values(dd).forEach((e) => {
     e.inversion = redondear(e.inversion); e.ventasMeta = redondear(e.ventasMeta);
   }));
+  [porDiaEdad, porDiaGenero].forEach((pd) => Object.values(pd).forEach((dd) => Object.values(dd).forEach((e) => {
+    e.i = redondear(e.i); e.v = redondear(e.v);
+  })));
 
   return {
     cuentas: cuentasOut,
@@ -234,6 +270,8 @@ async function syncMeta() {
     desgloses: DESGLOSES.map(({ id, nombre }) => ({ id, nombre })).concat([{ id: "otro", nombre: "Sin clasificar" }]),
     porDia,
     porDiaDesglose,
+    porDiaEdad,
+    porDiaGenero,
     anuncios: anunciosOut,
   };
 }
@@ -258,6 +296,31 @@ function valorInsight(arr, nombre) {
   if (!m) return null;
   if (m.total_value && m.total_value.value != null) return num(m.total_value.value);
   if (Array.isArray(m.values) && m.values.length) return m.values.reduce((s, v) => s + num(v.value), 0);
+  return null;
+}
+
+// Seguidoras por edad, género o ciudad. Meta cambió varias veces los parámetros de esta métrica,
+// así que se prueban las variantes conocidas y se usa la primera que responda.
+async function demografiaSeguidoras(igId, dim) {
+  const intentos = [
+    { metric: "follower_demographics", period: "lifetime", metric_type: "total_value", breakdown: dim },
+    { metric: "follower_demographics", period: "lifetime", metric_type: "total_value", breakdown: dim, timeframe: "this_month" },
+    { metric: "follower_demographics", period: "lifetime", metric_type: "total_value", breakdown: dim, timeframe: "last_90_days" },
+  ];
+  let ultimoError = null;
+  for (const params of intentos) {
+    try {
+      const r = await graphGet(`/${igId}/insights`, params);
+      const m = (r.data || [])[0];
+      const res = m && m.total_value && m.total_value.breakdowns && m.total_value.breakdowns[0] && m.total_value.breakdowns[0].results;
+      if (Array.isArray(res) && res.length) {
+        const nombre = (v) => (dim === "gender" ? ({ F: "Mujeres", M: "Hombres", U: "Sin dato" }[v] || v) : v);
+        return res.map((x) => ({ nombre: nombre((x.dimension_values || [])[0] || "Sin dato"), valor: num(x.value) }))
+          .sort((a, b) => b.valor - a.valor).slice(0, dim === "city" ? 20 : 12);
+      }
+    } catch (err) { ultimoError = err.message; }
+  }
+  if (ultimoError) console.warn(`Instagram: sin demografía por ${dim} (${ultimoError})`);
   return null;
 }
 
@@ -314,6 +377,12 @@ async function syncInstagram() {
   }
   console.log(`Instagram: ${publicaciones.length} publicaciones analizadas`);
 
+  const demografia = {};
+  for (const [clave, dim] of [["edad", "age"], ["genero", "gender"], ["ciudad", "city"]]) {
+    demografia[clave] = await demografiaSeguidoras(ig.id, dim);
+  }
+  console.log(`Instagram: demografía de seguidoras ${Object.entries(demografia).map(([k, v]) => `${k}=${v ? v.length : "sin datos"}`).join(", ")}`);
+
   return {
     usuario: ig.username,
     seguidores: num(ig.followers_count),
@@ -327,6 +396,7 @@ async function syncInstagram() {
     },
     porDia,
     publicaciones,
+    demografia,
   };
 }
 
@@ -453,6 +523,169 @@ function calcularClientas(pedidos, hoy) {
   };
 }
 
+// ---------- Perfil de clientas: de dónde son, qué compran, cómo compran, cuánto valen ----------
+// Todo agregado: provincias, ciudades, talles, medios de pago, etc. Ningún dato que identifique a una persona.
+const TALLE_RE = /^(xxs|xs|s|m|l|xl|xxl|xxxl|2xl|3xl|4xl|5xl|t\.?\s?u\.?|u|unico|talle unico|\d{1,2}|\d{1,2}\s?\/\s?\d{1,2})$/i;
+function talleDe(li) {
+  const vals = (li.variant_values || []).map((v) => (typeof v === "object" && v ? v.es || Object.values(v)[0] : v)).filter(Boolean).map(String);
+  const t = vals.find((v) => TALLE_RE.test(normalizar(v)));
+  if (!t) return null;
+  if (/^(t\.?\s?u\.?|u|unico|talle unico)$/.test(normalizar(t))) return "Único";
+  return t.toUpperCase().replace(/\s+/g, "");
+}
+function zonaDe(o) {
+  const dir = o.shipping_address || o.billing_address || {};
+  const cp = parseInt(String(dir.zipcode || o.shipping_zipcode || o.billing_zipcode || "").replace(/\D/g, "").slice(0, 4), 10);
+  const prov = String(dir.province || o.shipping_province || o.billing_province || "").trim();
+  const ciudad = String(dir.city || o.shipping_city || o.billing_city || dir.locality || "").trim();
+  const np = normalizar(prov);
+  let region = "Interior";
+  if (np.includes("capital") || np.includes("caba") || np.includes("autonoma") || (cp >= 1000 && cp < 1500)) region = "CABA";
+  else if (np.includes("buenos aires") && cp >= 1500 && cp < 2000) region = "GBA";
+  else if (!prov && !cp) region = "Sin dato";
+  return { prov: prov || "Sin dato", ciudad: ciudad || "Sin dato", region };
+}
+function titulo(s) { return String(s).toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()); }
+function topN(map, n, ordenar = (a, b) => b.facturacion - a.facturacion) {
+  return Array.from(map.values()).sort(ordenar).slice(0, n).map((x) => {
+    const o = { ...x };
+    if ("facturacion" in o) o.facturacion = Math.round(o.facturacion);
+    if (o.clientasSet) { o.clientas = o.clientasSet.size; delete o.clientasSet; }
+    return o;
+  });
+}
+function acumular(map, clave, base, f) {
+  const e = map.get(clave) || { ...base };
+  f(e); map.set(clave, e);
+}
+const TICKET_RANGOS = [[0, 40000, "Menos de $40 mil"], [40000, 70000, "$40 a $70 mil"], [70000, 100000, "$70 a $100 mil"], [100000, 150000, "$100 a $150 mil"], [150000, 250000, "$150 a $250 mil"], [250000, Infinity, "Más de $250 mil"]];
+
+function calcularPerfil(pedidos, productos, hoy) {
+  const meta = new Map(productos.map((p) => [p.id, {
+    cat: categoriaPrincipal((p.categories || []).map((c) => (c.name && c.name.es) || c.name).filter(Boolean)),
+    nombre: (p.name && p.name.es) || p.name || `Producto ${p.id}`,
+  }]));
+  const catDe = (li) => (meta.get(li.product_id) || {}).cat || "Sin categoría";
+  const nomDe = (li) => (meta.get(li.product_id) || {}).nombre || li.name || "Producto";
+
+  const provincias = new Map(); const ciudades = new Map(); const regiones = new Map();
+  const talles = new Map(); const categorias = new Map();
+  const paresCat = new Map(); const paresProd = new Map();
+  const pagos = new Map(); const cuotas = new Map(); const envios = new Map();
+  const tickets = new Map(TICKET_RANGOS.map(([, , l]) => [l, { rango: l, pedidos: 0, facturacion: 0 }]));
+  const diaHora = Array.from({ length: 7 }, () => Array(24).fill(0));
+  let unidadesTot = 0;
+  const porClienta = new Map();
+
+  pedidos.forEach((o) => {
+    const id = idClienta(o);
+    const total = totalPedido(o);
+    const z = zonaDe(o);
+    const items = o.products || [];
+
+    acumular(provincias, z.prov, { nombre: z.prov, pedidos: 0, facturacion: 0, clientasSet: new Set() }, (e) => { e.pedidos += 1; e.facturacion += total; if (id) e.clientasSet.add(id); });
+    const cKey = `${normalizar(z.ciudad)}|${normalizar(z.prov)}`;
+    acumular(ciudades, cKey, { nombre: titulo(z.ciudad), provincia: z.prov, pedidos: 0, facturacion: 0, clientasSet: new Set() }, (e) => { e.pedidos += 1; e.facturacion += total; if (id) e.clientasSet.add(id); });
+    acumular(regiones, z.region, { nombre: z.region, pedidos: 0, facturacion: 0, clientasSet: new Set() }, (e) => { e.pedidos += 1; e.facturacion += total; if (id) e.clientasSet.add(id); });
+
+    const catsPedido = new Set(); const prodsPedido = new Set();
+    items.forEach((li) => {
+      const u = num(li.quantity); const f = num(li.price) * u;
+      unidadesTot += u;
+      const t = talleDe(li) || "Sin talle";
+      acumular(talles, t, { talle: t, unidades: 0, facturacion: 0 }, (e) => { e.unidades += u; e.facturacion += f; });
+      const c = catDe(li);
+      acumular(categorias, c, { categoria: c, unidades: 0, facturacion: 0, clientasSet: new Set() }, (e) => { e.unidades += u; e.facturacion += f; if (id) e.clientasSet.add(id); });
+      catsPedido.add(c); if (li.product_id != null) prodsPedido.add(li.product_id);
+    });
+    const cs = Array.from(catsPedido).sort();
+    for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
+      acumular(paresCat, `${cs[i]}|${cs[j]}`, { a: cs[i], b: cs[j], pedidos: 0 }, (e) => { e.pedidos += 1; });
+    }
+    const ps = Array.from(prodsPedido).sort((a, b) => a - b);
+    if (ps.length <= 15) for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+      acumular(paresProd, `${ps[i]}|${ps[j]}`, { a: ps[i], b: ps[j], pedidos: 0 }, (e) => { e.pedidos += 1; });
+    }
+
+    const pago = titulo((o.payment_details && o.payment_details.method) || o.gateway_name || o.gateway || "Sin dato").replace(/_/g, " ");
+    acumular(pagos, pago, { medio: pago, pedidos: 0, facturacion: 0 }, (e) => { e.pedidos += 1; e.facturacion += total; });
+    const nc = num(o.payment_details && o.payment_details.installments) || 1;
+    const cl = nc <= 1 ? "1 pago" : nc <= 3 ? "2 a 3 cuotas" : nc <= 6 ? "4 a 6 cuotas" : "7 cuotas o más";
+    acumular(cuotas, cl, { cuotas: cl, pedidos: 0, facturacion: 0 }, (e) => { e.pedidos += 1; e.facturacion += total; });
+    const envio = String(o.shipping_option || (o.shipping_pickup_type === "pickup" ? "Retiro" : "") || "Sin dato").trim().slice(0, 60);
+    acumular(envios, envio, { envio, pedidos: 0, facturacion: 0 }, (e) => { e.pedidos += 1; e.facturacion += total; });
+    const rango = TICKET_RANGOS.find(([a, b]) => total >= a && total < b);
+    if (rango) { const e = tickets.get(rango[2]); e.pedidos += 1; e.facturacion += total; }
+    const ar = new Date(new Date(o.created_at).getTime() - ARG_OFFSET_MS);
+    diaHora[ar.getUTCDay()][ar.getUTCHours()] += 1;
+
+    if (id) {
+      const arr = porClienta.get(id) || [];
+      arr.push({ fecha: fechaAR(o.created_at), total, cats: catsPedido });
+      porClienta.set(id, arr);
+    }
+  });
+
+  // Cuánto valen: concentración (Pareto) y entrada → recompra
+  const valores = Array.from(porClienta.values()).map((cs) => cs.reduce((s, c) => s + c.total, 0)).sort((a, b) => b - a);
+  const totalFact = valores.reduce((s, v) => s + v, 0);
+  function pctClientasPara(p) {
+    let acc = 0;
+    for (let i = 0; i < valores.length; i++) { acc += valores[i]; if (acc >= totalFact * p) return redondear((i + 1) / valores.length, 4); }
+    return 1;
+  }
+  const top10 = valores.slice(0, Math.max(1, Math.round(valores.length * 0.1))).reduce((s, v) => s + v, 0);
+
+  const entrada = new Map();
+  porClienta.forEach((cs) => {
+    cs.sort((a, b) => (a.fecha < b.fecha ? -1 : 1));
+    const primera = cs[0];
+    const dias = diasEntre(primera.fecha, hoy);
+    if (dias < 90) return; // necesita al menos 90 días para ver si volvió
+    const volvio = cs.some((c, i) => i > 0 && diasEntre(primera.fecha, c.fecha) > 0 && diasEntre(primera.fecha, c.fecha) <= 90);
+    primera.cats.forEach((cat) => acumular(entrada, cat, { categoria: cat, clientas: 0, volvieron: 0, ticketPrimera: 0 }, (e) => {
+      e.clientas += 1; if (volvio) e.volvieron += 1; e.ticketPrimera += primera.total;
+    }));
+  });
+  const entradaArr = Array.from(entrada.values()).filter((e) => e.clientas >= 15).map((e) => ({
+    categoria: e.categoria, clientas: e.clientas, tasaVuelta: redondear(e.volvieron / e.clientas, 4), ticketPrimera: Math.round(e.ticketPrimera / e.clientas),
+  })).sort((a, b) => b.clientas - a.clientas).slice(0, 15);
+
+  const nombreProd = (id) => (meta.get(id) || {}).nombre || `Producto ${id}`;
+  const totalTalles = Array.from(talles.values()).reduce((s, t) => s + t.unidades, 0);
+
+  return {
+    pedidos: pedidos.length,
+    clientas: porClienta.size,
+    unidadesPorPedido: pedidos.length ? redondear(unidadesTot / pedidos.length, 1) : null,
+    ticketPromedio: pedidos.length ? Math.round(totalFact / pedidos.length) : null,
+    zona: {
+      regiones: topN(regiones, 4),
+      provincias: topN(provincias, 15),
+      ciudades: topN(ciudades, 25),
+    },
+    compran: {
+      talles: topN(talles, 20, (a, b) => b.unidades - a.unidades).map((t) => ({ ...t, pct: totalTalles ? redondear(t.unidades / totalTalles, 4) : 0 })),
+      categorias: topN(categorias, 20),
+      paresCategorias: topN(paresCat, 10, (a, b) => b.pedidos - a.pedidos),
+      paresProductos: topN(paresProd, 10, (a, b) => b.pedidos - a.pedidos).map((p) => ({ a: nombreProd(p.a), b: nombreProd(p.b), pedidos: p.pedidos })),
+    },
+    comoCompran: {
+      pagos: topN(pagos, 8),
+      cuotas: topN(cuotas, 4),
+      envios: topN(envios, 8, (a, b) => b.pedidos - a.pedidos),
+      tickets: Array.from(tickets.values()).map((t) => ({ ...t, facturacion: Math.round(t.facturacion) })),
+      diaHora, // [domingo..sábado][0..23] cantidad de pedidos, hora Argentina
+    },
+    valor: {
+      pctClientas50: pctClientasPara(0.5),
+      pctClientas80: pctClientasPara(0.8),
+      pctFacturacionTop10: totalFact ? redondear(top10 / totalFact, 4) : null,
+      entrada: entradaArr,
+    },
+  };
+}
+
 function calcularTienda(pedidos, productos, desdeDia) {
   const catPorProducto = new Map(productos.map((p) => [p.id, categoriaPrincipal((p.categories || []).map((c) => (c.name && c.name.es) || c.name).filter(Boolean))]));
   const porDia = {};          // fecha → { facturacion, pedidos }
@@ -480,9 +713,10 @@ async function syncTienda() {
   console.log("Tienda Nube: trayendo pedidos para clientas...");
   const pedidos = (await tnTodas("/orders", { created_at_min: desde })).filter(pedidoVale);
   console.log(`Tienda Nube: ${pedidos.length} pedidos pagados`);
-  const productos = await tnTodas("/products", { fields: "id,categories" });
+  const productos = await tnTodas("/products", { fields: "id,categories,name" });
   return {
     clientas: calcularClientas(pedidos, hoy),
+    perfil: calcularPerfil(pedidos, productos, hoy),
     tienda: calcularTienda(pedidos, productos, sumarDias(hoy, -DIAS_META)),
   };
 }
@@ -512,7 +746,10 @@ async function main() {
       if (nombre === "tiendaNube") { salida.clientas = r.clientas; salida.tienda = r.tienda; }
       else salida[nombre] = r;
       await db.ref(`dashboard_marketing/${nombre === "tiendaNube" ? "clientas" : nombre}`).set(nombre === "tiendaNube" ? r.clientas : r);
-      if (nombre === "tiendaNube") await db.ref("dashboard_marketing/tienda").set(r.tienda);
+      if (nombre === "tiendaNube") {
+        await db.ref("dashboard_marketing/tienda").set(r.tienda);
+        await db.ref("dashboard_marketing/perfil").set(r.perfil);
+      }
       errores[nombre] = null;
       console.log(`${nombre}: guardado`);
     } catch (err) {
@@ -530,4 +767,4 @@ if (require.main === module) {
   main().then(() => process.exit(0)).catch((err) => { console.error("Error en sync-marketing.js:", err.message); process.exit(1); });
 }
 
-module.exports = { clasificarAnuncio, calcularClientas, calcularTienda, valorAccion, valorInsight, fechaAR, sumarDias };
+module.exports = { syncMeta, syncInstagram, clasificarAnuncio, calcularClientas, calcularPerfil, talleDe, zonaDe, calcularTienda, valorAccion, valorInsight, fechaAR, sumarDias };
