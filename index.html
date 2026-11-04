@@ -1348,7 +1348,7 @@
     return { items, costos, tipos };
   }
   // Guarda una carga. Si se superpone con otras, las reemplaza (así nada se cuenta dos veces).
-  // Para Objetivos: si es de 7 días o menos se guarda en la semana del lunes del "desde"; si es más larga, con la fecha "hasta".
+  // Para Objetivos: si es de 7 días o menos se guarda en la semana del lunes del "desde"; si es más larga, con la fecha "desde" (para que cuente en el mes en que arranca).
   async function localSubir(files, desde, hasta) {
     const { items, costos, tipos } = await lcLeer(files);
     if (!items.length) throw new Error("No encontré artículos en los archivos.");
@@ -1356,7 +1356,7 @@
     if (pisadas.length && !confirm(`Esta carga se superpone con ${pisadas.map(c => lcRangoTxt(c)).join(", ")}. Se reemplaza${pisadas.length > 1 ? "n" : ""} por la nueva. ¿Seguimos?`)) throw new Error("Cancelado.");
     const id = desde + "_" + hasta, ahora = new Date().toISOString(), U = {};
     pisadas.forEach(c => { U["dashboard_local_cargas/" + c.id] = null; if (c.objKey) U["dashboard_objetivos/local/semanas/" + c.objKey] = null; });
-    const objKey = lcDiasRango(desde, hasta) <= 7 ? weekKey(new Date(desde + "T12:00:00")) : hasta;
+    const objKey = lcDiasRango(desde, hasta) <= 7 ? weekKey(new Date(desde + "T12:00:00")) : desde;
     U["dashboard_local_cargas/" + id] = { desde, hasta, cargado: ahora, archivos: files.length, tipos, objKey, items };
     Object.entries(costos).forEach(([k, c]) => { U["dashboard_local_costos/" + k] = { ...c, fecha: hasta }; });
     const categorias = {};
