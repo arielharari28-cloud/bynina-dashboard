@@ -1321,7 +1321,7 @@
       const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad"));
       if (h < 0) throw new Error(`"${f.name}" no tiene las columnas Código y Cantidad.`);
       const col = n => rows[h].findIndex(c => lcNorm(c) === n);
-      const iK = col("codigo"), iD = col("descripcion"), iU = col("cantidad"), iC = col("color");
+      const iK = col("codigo"), iD = col("descripcion"), iU = col("cantidad"), iC = col("color"), iTa = col("talle");
       const iCo = col("costo total"), iVT = col("venta total"), iT = col("total");
       const esGan = iCo >= 0;
       if (!esGan && iT < 0 && iC < 0) throw new Error(`"${f.name}" no parece ni el Ranking de artículos ni Ganancia por Artículos.`);
@@ -1335,13 +1335,14 @@
           e.u += u; e.f += iVT >= 0 ? num(r[iVT]) : 0; e.co += num(r[iCo]); gan.set(k, e);
         } else {
           const color = iC >= 0 && r[iC] ? String(r[iC]).trim() : "Sin color";
-          const e = rank.get(k) || { k, d, u: 0, f: 0, c: {} };
-          e.u += u; e.f += iT >= 0 ? num(r[iT]) : 0; e.c[color] = (e.c[color] || 0) + u; rank.set(k, e);
+          const talle = iTa >= 0 && r[iTa] != null && String(r[iTa]).trim() !== "" ? String(r[iTa]).trim() : "Sin talle";
+          const e = rank.get(k) || { k, d, u: 0, f: 0, c: {}, t: {}, v: {} };
+          e.u += u; e.f += iT >= 0 ? num(r[iT]) : 0; e.c[color] = (e.c[color] || 0) + u; e.t[talle] = (e.t[talle] || 0) + u; const cv = color + "|" + talle; e.v[cv] = (e.v[cv] || 0) + u; rank.set(k, e);
         }
       });
     }
     const base = rank.size ? rank : gan;
-    const items = Array.from(base.values()).map(e => ({ k: e.k, d: e.d, u: e.u, f: Math.round(e.f || 0), c: e.c ? Object.entries(e.c) : [] }));
+    const items = Array.from(base.values()).map(e => ({ k: e.k, d: e.d, u: e.u, f: Math.round(e.f || 0), c: e.c ? Object.entries(e.c) : [], t: e.t ? Object.entries(e.t) : [], v: e.v ? Object.entries(e.v) : [] }));
     const costos = {};
     gan.forEach(e => { if (e.u > 0 && e.co > 0) costos[lcKey(e.k)] = { k: e.k, d: e.d, cu: Math.round(e.co / e.u) }; });
     return { items, costos, tipos };
