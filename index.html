@@ -1418,7 +1418,8 @@
       if (origenRanking.size > 1) throw new Error("Elegiste el Ranking en PDF y en Excel: se contaría dos veces. Subí uno solo.");
       const num = v => typeof v === "number" ? v : parseNumAR(v);
       rows.slice(h + 1).forEach(r => {
-        if (!r || r[iK] == null || String(r[iK]).trim() === "" || r[iU] == null) return;
+        // Cantidad vacía = neto 0 (venta y nota de crédito): se lee igual porque el Total puede no ser 0.
+        if (!r || r[iK] == null || String(r[iK]).trim() === "") return;
         const k = String(r[iK]).trim(), d = String(iD >= 0 ? r[iD] || "" : "").trim(), u = num(r[iU]);
         if (esGan) {
           const e = gan.get(k) || { k, d, u: 0, f: 0, co: 0 };
