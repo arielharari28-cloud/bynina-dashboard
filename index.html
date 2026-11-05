@@ -1381,11 +1381,22 @@
   }
   // Colores que el sistema exporta rotos: se tratan como "sin color" para no crear un color falso.
   const lcColorValido = c => { const t = c == null ? "" : String(c).trim(); return t && !/^(nan|0|null|undefined)$/i.test(t); };
+  // Planilla con una hoja por semana: se usa la hoja cuyo nombre arranca con la fecha "Desde" (ej. "05-10-2026 / 11-10-2026").
+  // Si no coincide, frena: mejor un aviso que cargar otra semana sin darse cuenta.
+  function lcElegirHoja(nombres, desde, archivo) {
+    const fecha = n => { const m = String(n).match(/(\d{2})-(\d{2})-(\d{4})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : null; };
+    const txt = d => d.split("-").reverse().join("/");
+    const exacta = nombres.find(n => fecha(n) === desde);
+    if (exacta) return exacta;
+    if (nombres.length === 1 && !fecha(nombres[0])) return nombres[0];
+    if (nombres.length === 1) throw new Error(`La hoja de "${archivo}" dice "${nombres[0]}", pero elegiste Desde ${txt(desde)}. Revisá las fechas.`);
+    throw new Error(`"${archivo}" no tiene ninguna hoja que arranque el ${txt(desde)}. Hojas: ${nombres.join(", ")}.`);
+  }
   // Lee los Excel de Ninox del local. Reconoce solo cada archivo por sus columnas:
   //  - "Ranking de artículos" (Código, Descripción, Cantidad, Color, Talle, Total): unidades, color y $ (puede venir en varios archivos por el límite de 300 filas)
   //  - "Ganancia por Artículos" (Código, Descripción, Cantidad, Venta Total, Costo Total, Ganancia): $ y costo
   // Si están los dos, unidades/color/$ salen del Ranking y el costo del de Ganancia.
-  async function lcLeer(files) {
+  async function lcLeer(files, desde) {
     const rank = new Map(), gan = new Map(), tipos = [], origenRanking = new Set();
     let coloresRotos = 0;
     for (const f of files) {
@@ -1393,7 +1404,7 @@
       let rows;
       if (esPdf) rows = await lcLeerPdf(f);
       else { const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
-        rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null }); }
+        rows = XLSX.utils.sheet_to_json(wb.Sheets[lcElegirHoja(wb.SheetNames, desde, f.name)], { header: 1, defval: null }); }
       const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad"));
       if (h < 0) throw new Error(`"${f.name}" no tiene las columnas Código y Cantidad.`);
       const col = n => rows[h].findIndex(c => lcNorm(c) === n);
@@ -1431,7 +1442,7 @@
   // Guarda una carga. Si se superpone con otras, las reemplaza (así nada se cuenta dos veces).
   // Para Objetivos: si es de 7 días o menos se guarda en la semana del lunes del "desde"; si es más larga, con la fecha "desde" (para que cuente en el mes en que arranca).
   async function localSubir(files, desde, hasta) {
-    const { items, costos, tipos, coloresRotos } = await lcLeer(files);
+    const { items, costos, tipos, coloresRotos } = await lcLeer(files, desde);
     if (!items.length) throw new Error("No encontré artículos en los archivos.");
     const pisadas = lcListaCargas().filter(c => c.id !== "legacy" && !(hasta < c.desde || desde > c.hasta));
     if (pisadas.length && !confirm(`Esta carga se superpone con ${pisadas.map(c => lcRangoTxt(c)).join(", ")}. Se reemplaza${pisadas.length > 1 ? "n" : ""} por la nueva. ¿Seguimos?`)) throw new Error("Cancelado.");
@@ -1464,7 +1475,7 @@
     const lunesPas = mondayOfWeek(new Date(hoy - 7 * 86400000)), domPas = new Date(lunesPas.getTime() + 6 * 86400000);
     const cargas = lcListaCargas().filter(c => c.id !== "legacy");
     return `<div class="card p-3 mt-2 text-sm space-y-2">
-      <div>Subí los archivos de Ninox del local para un período: <b>Artículos más vendidos</b> en PDF, con curva y todas las páginas (el Excel viene sin color) y, si querés ganancia, también <b>Ganancia por Artículos</b>. Elegilos todos juntos: la app reconoce cuál es cuál. Sirve para el Foco y para Objetivos.</div>
+      <div>Subí los archivos de Ninox del local para un período: la <b>planilla con una hoja por semana</b> (toma la hoja que arranca en la fecha Desde) o <b>Artículos más vendidos</b> en PDF, con curva y todas las páginas; si querés ganancia, también <b>Ganancia por Artículos</b>. Elegilos todos juntos: la app reconoce cuál es cuál. Sirve para el Foco y para Objetivos.</div>
       <div class="flex flex-wrap gap-1.5 items-center text-xs"><span class="text-slate-500">Rápido:</span>
         <button class="pill" data-lcq="${pre}" data-d="${iso(lunesPas)}" data-h="${iso(domPas)}">Semana pasada</button>
         <button class="pill" data-lcq="${pre}" data-d="${iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1))}" data-h="${iso(hoy)}">Este mes</button>
