@@ -1309,15 +1309,90 @@
   const focoVendC = p => focoCanal === "web" ? clVend(p) : focoCanal === "local" ? localVend(p) : clVend(p) + localVend(p);
   const localColorVend = (p, color) => { if (!localData || focoCanal === "web") return 0; const e = localIndice().porProd.get(p.id);
     return e ? (e.colores.get(lcNorm(color)) || 0) * focoFactorLocal() : 0; };
+  // ---- PDF de Ninox: el Excel de "Artículos más vendidos" trae el color como NaN (nov 2026), el PDF lo trae bien ----
+  // pdf.js se baja recién cuando alguien elige un PDF.
+  let lcPdfJs = null;
+  function lcCargarPdfJs() {
+    if (lcPdfJs) return lcPdfJs;
+    lcPdfJs = new Promise((ok, mal) => {
+      const base = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/";
+      const sc = document.createElement("script"); sc.src = base + "pdf.min.js";
+      sc.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = base + "pdf.worker.min.js"; ok(window.pdfjsLib); };
+      sc.onerror = () => { lcPdfJs = null; mal(new Error("No se pudo cargar el lector de PDF. Revisá la conexión.")); };
+      document.head.appendChild(sc);
+    });
+    return lcPdfJs;
+  }
+  // Convierte las páginas en filas [encabezado, ...celdas], ubicando cada texto por su posición.
+  // Los encabezados pueden estar centrados, así que el borde de cada columna sale de dónde arrancan sus datos.
+  // Los textos largos ocupan varios renglones (hasta cruzar de página): el renglón sin código se suma a la fila anterior.
+  function lcFilasDePaginas(paginas) {
+    let cols = null; const lineas = [];
+    paginas.forEach(items => {
+      const renglones = [];
+      items.filter(t => t.str.trim()).sort((a, b) => b.y - a.y || a.x - b.x).forEach(t => {
+        const r = renglones.find(l => Math.abs(l.y - t.y) < 2.5);
+        if (r) r.items.push(t); else renglones.push({ y: t.y, items: [t] });
+      });
+      let enTabla = false;
+      renglones.forEach(r => {
+        r.items.sort((a, b) => a.x - b.x);
+        const txt = r.items.map(t => lcNorm(t.str));
+        if (txt.includes("codigo") && txt.includes("cantidad")) { enTabla = true; if (!cols) cols = r.items.map(t => ({ n: t.str.trim(), x: t.x })); return; }
+        if (!enTabla || !cols || txt.join(" ") === "promedio" || txt.includes("about blank")) return;
+        lineas.push(r.items);
+      });
+    });
+    if (!cols) return [];
+    // Dónde arranca cada columna: el valor que más se repite, de izquierda a derecha.
+    const moda = xs => { const f = new Map(); xs.forEach(x => { const k = Math.round(x); f.set(k, (f.get(k) || 0) + 1); });
+      let m = null, n = 0; f.forEach((v, k) => { if (v > n) { n = v; m = k; } }); return m; };
+    const todos = lineas.flat().map(t => t.x), ini = moda(todos.filter(x => x <= cols[0].x + 5));
+    const conCodigo = lineas.filter(l => Math.abs(l[0].x - ini) <= 3);
+    cols.forEach((c, k) => {
+      const nom = lcNorm(c.n), prev = k ? cols[k - 1].b : -1;
+      let b = null;
+      if (k === 0) b = ini;
+      else if (k === 1) b = moda(conCodigo.map(l => l[1] && l[1].x).filter(x => x != null));
+      else if (nom === "color") b = moda(conCodigo.map(l => { const t = l.find(u => u.x > prev + 5); return t && t.x; }).filter(x => x != null));
+      else b = moda(todos.filter(x => x > prev + 5 && x >= c.x - 45 && x <= c.x + 5));
+      c.b = b == null ? c.x : b;
+    });
+    const salida = []; let fila = null;
+    const cerrar = () => { if (fila) salida.push(fila.map(c => c.join(" ").replace(/\s+/g, " ").trim())); fila = null; };
+    lineas.forEach(l => {
+      const celdas = cols.map(() => []);
+      l.forEach(t => { let i = 0; cols.forEach((c, k) => { if (t.x >= c.b - 2) i = k; }); celdas[i].push(t.str); });
+      if (celdas[0].length) { cerrar(); fila = celdas; }
+      else if (fila) celdas.forEach((c, i) => fila[i].push(...c));
+    });
+    cerrar();
+    return [cols.map(c => c.n), ...salida];
+  }
+  async function lcLeerPdf(file) {
+    const lib = await lcCargarPdfJs();
+    const doc = await lib.getDocument({ data: await file.arrayBuffer() }).promise, paginas = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const c = await (await doc.getPage(i)).getTextContent();
+      paginas.push(c.items.map(t => ({ str: t.str, x: t.transform[4], y: t.transform[5] })));
+    }
+    return lcFilasDePaginas(paginas);
+  }
+  // Colores que el sistema exporta rotos: se tratan como "sin color" para no crear un color falso.
+  const lcColorValido = c => { const t = c == null ? "" : String(c).trim(); return t && !/^(nan|0|null|undefined)$/i.test(t); };
   // Lee los Excel de Ninox del local. Reconoce solo cada archivo por sus columnas:
   //  - "Ranking de artículos" (Código, Descripción, Cantidad, Color, Talle, Total): unidades, color y $ (puede venir en varios archivos por el límite de 300 filas)
   //  - "Ganancia por Artículos" (Código, Descripción, Cantidad, Venta Total, Costo Total, Ganancia): $ y costo
   // Si están los dos, unidades/color/$ salen del Ranking y el costo del de Ganancia.
   async function lcLeer(files) {
-    const rank = new Map(), gan = new Map(), tipos = [];
+    const rank = new Map(), gan = new Map(), tipos = [], origenRanking = new Set();
+    let coloresRotos = 0;
     for (const f of files) {
-      const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null });
+      const esPdf = /\.pdf$/i.test(f.name);
+      let rows;
+      if (esPdf) rows = await lcLeerPdf(f);
+      else { const wb = XLSX.read(await f.arrayBuffer(), { type: "array" });
+        rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: null }); }
       const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad"));
       if (h < 0) throw new Error(`"${f.name}" no tiene las columnas Código y Cantidad.`);
       const col = n => rows[h].findIndex(c => lcNorm(c) === n);
@@ -1325,7 +1400,10 @@
       const iCo = col("costo total"), iVT = col("venta total"), iT = col("total");
       const esGan = iCo >= 0;
       if (!esGan && iT < 0 && iC < 0) throw new Error(`"${f.name}" no parece ni el Ranking de artículos ni Ganancia por Artículos.`);
+      if (esPdf && iT < 0 && iVT < 0) throw new Error(`"${f.name}" salió cortado a la derecha: no se ve la columna Total. Volvé a guardarlo para que entre toda la tabla.`);
       tipos.push(esGan ? "ganancia" : "ranking");
+      if (!esGan) origenRanking.add(esPdf ? "pdf" : "excel");
+      if (origenRanking.size > 1) throw new Error("Elegiste el Ranking en PDF y en Excel: se contaría dos veces. Subí uno solo.");
       const num = v => typeof v === "number" ? v : parseNumAR(v);
       rows.slice(h + 1).forEach(r => {
         if (!r || r[iK] == null || String(r[iK]).trim() === "" || r[iU] == null) return;
@@ -1334,7 +1412,9 @@
           const e = gan.get(k) || { k, d, u: 0, f: 0, co: 0 };
           e.u += u; e.f += iVT >= 0 ? num(r[iVT]) : 0; e.co += num(r[iCo]); gan.set(k, e);
         } else {
-          const color = iC >= 0 && r[iC] ? String(r[iC]).trim() : "Sin color";
+          const colorOk = iC >= 0 && lcColorValido(r[iC]);
+          if (iC >= 0 && !colorOk && r[iC] != null && String(r[iC]).trim() !== "") coloresRotos++;
+          const color = colorOk ? String(r[iC]).trim() : "Sin color";
           const talle = iTa >= 0 && r[iTa] != null && String(r[iTa]).trim() !== "" ? String(r[iTa]).trim() : "Sin talle";
           const e = rank.get(k) || { k, d, u: 0, f: 0, c: {}, t: {}, v: {} };
           e.u += u; e.f += iT >= 0 ? num(r[iT]) : 0; e.c[color] = (e.c[color] || 0) + u; e.t[talle] = (e.t[talle] || 0) + u; const cv = color + "|" + talle; e.v[cv] = (e.v[cv] || 0) + u; rank.set(k, e);
@@ -1345,12 +1425,12 @@
     const items = Array.from(base.values()).map(e => ({ k: e.k, d: e.d, u: e.u, f: Math.round(e.f || 0), c: e.c ? Object.entries(e.c) : [], t: e.t ? Object.entries(e.t) : [], v: e.v ? Object.entries(e.v) : [] }));
     const costos = {};
     gan.forEach(e => { if (e.u > 0 && e.co > 0) costos[lcKey(e.k)] = { k: e.k, d: e.d, cu: Math.round(e.co / e.u) }; });
-    return { items, costos, tipos };
+    return { items, costos, tipos, coloresRotos };
   }
   // Guarda una carga. Si se superpone con otras, las reemplaza (así nada se cuenta dos veces).
   // Para Objetivos: si es de 7 días o menos se guarda en la semana del lunes del "desde"; si es más larga, con la fecha "desde" (para que cuente en el mes en que arranca).
   async function localSubir(files, desde, hasta) {
-    const { items, costos, tipos } = await lcLeer(files);
+    const { items, costos, tipos, coloresRotos } = await lcLeer(files);
     if (!items.length) throw new Error("No encontré artículos en los archivos.");
     const pisadas = lcListaCargas().filter(c => c.id !== "legacy" && !(hasta < c.desde || desde > c.hasta));
     if (pisadas.length && !confirm(`Esta carga se superpone con ${pisadas.map(c => lcRangoTxt(c)).join(", ")}. Se reemplaza${pisadas.length > 1 ? "n" : ""} por la nueva. ¿Seguimos?`)) throw new Error("Cancelado.");
@@ -1365,7 +1445,7 @@
       e.facturacion += it.f; e.unidades += it.u; categorias[cat] = e; facturacion += it.f; unidades += it.u; });
     U["dashboard_objetivos/local/semanas/" + objKey] = { facturacion, unidades, categorias, cargaId: id, desde, hasta };
     await db.ref().update(U);
-    return { items, costos, tipos, facturacion, unidades, objKey };
+    return { items, costos, tipos, facturacion, unidades, objKey, coloresRotos };
   }
   const lcF = s => s ? s.split("-").reverse().slice(0, 2).join("/") : "";
   const lcRangoTxt = c => `${lcF(c.desde)} al ${lcF(c.hasta)}`;
@@ -1382,14 +1462,14 @@
     const lunesPas = mondayOfWeek(new Date(hoy - 7 * 86400000)), domPas = new Date(lunesPas.getTime() + 6 * 86400000);
     const cargas = lcListaCargas().filter(c => c.id !== "legacy");
     return `<div class="card p-3 mt-2 text-sm space-y-2">
-      <div>Subí los Excel de Ninox del local para un período: el <b>Ranking de artículos</b> (con color, puede ser en varios archivos) y, si querés ganancia, también <b>Ganancia por Artículos</b>. Elegilos todos juntos: la app reconoce cuál es cuál. Sirve para el Foco y para Objetivos.</div>
+      <div>Subí los archivos de Ninox del local para un período: <b>Artículos más vendidos</b> en PDF, con curva y todas las páginas (el Excel viene sin color) y, si querés ganancia, también <b>Ganancia por Artículos</b>. Elegilos todos juntos: la app reconoce cuál es cuál. Sirve para el Foco y para Objetivos.</div>
       <div class="flex flex-wrap gap-1.5 items-center text-xs"><span class="text-slate-500">Rápido:</span>
         <button class="pill" data-lcq="${pre}" data-d="${iso(lunesPas)}" data-h="${iso(domPas)}">Semana pasada</button>
         <button class="pill" data-lcq="${pre}" data-d="${iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1))}" data-h="${iso(hoy)}">Este mes</button>
         <button class="pill" data-lcq="${pre}" data-d="${iso(new Date(hoy - 29 * 86400000))}" data-h="${iso(hoy)}">Últimos 30 días</button></div>
       <div class="flex flex-wrap gap-2 items-center"><label class="text-xs">Desde <input type="date" id="${pre}Desde" value="${iso(lunesPas)}" class="border rounded px-2 py-1"></label>
         <label class="text-xs">Hasta <input type="date" id="${pre}Hasta" value="${iso(domPas)}" class="border rounded px-2 py-1"></label>
-        <input type="file" id="${pre}Files" accept=".xlsx,.xls" multiple class="text-xs">
+        <input type="file" id="${pre}Files" accept=".pdf,.xlsx,.xls" multiple class="text-xs">
         <button class="pill active" id="${pre}Guardar">Guardar</button><span id="${pre}Msg" class="text-xs"></span></div>
       ${cargas.length ? `<div class="pt-2 border-t border-slate-100"><div class="text-xs font-semibold text-slate-500 mb-1">Cargas del local</div>
         <div class="space-y-1">${cargas.slice(0, 12).map(c => { const u = (c.items || []).reduce((s, i) => s + (i.u || 0), 0), f = (c.items || []).reduce((s, i) => s + (i.f || 0), 0);
@@ -1409,7 +1489,7 @@
       msg.textContent = "Leyendo…"; msg.style.color = "";
       try { const r = await localSubir(files, d, h);
         const sinCosto = !r.tipos.includes("ganancia") ? " Sin archivo de Ganancia: se usa el último costo conocido." : "";
-        const sinColor = !r.tipos.includes("ranking") ? " Sin Ranking: no hay color del local en esta carga." : "";
+        const sinColor = !r.tipos.includes("ranking") ? " Sin Ranking: no hay color del local en esta carga." : r.coloresRotos ? " Atención: este archivo vino sin colores. Subí el PDF." : "";
         msg.style.color = "#15803d"; msg.textContent = `✓ ${r.items.length} artículos · ${fmtNum(r.unidades)} u. · ${fmtMoney(r.facturacion)}.${sinCosto}${sinColor}`;
         if (alTerminar) setTimeout(alTerminar, 2500); }
       catch (err) { msg.textContent = err.message === "Cancelado." ? "" : "No se pudo cargar: " + err.message; msg.style.color = "#b91c1c"; }
