@@ -683,7 +683,8 @@
     Object.keys(semanas).forEach(key => {
       const fecha = new Date(key + "T00:00:00");
       if (fecha.getMonth() !== now.getMonth() || fecha.getFullYear() !== now.getFullYear()) return;
-      Object.entries(semanas[key].categorias || {}).forEach(([cat, v]) => {
+      Object.entries(semanas[key].categorias || {}).forEach(([catK, v]) => {
+        const cat = catK.replace(/_/g, "/");
         const prev = out[cat] || { facturacion: 0, unidades: 0 };
         prev.facturacion += Number(v.facturacion || 0);
         prev.unidades += Number(v.unidades || 0);
@@ -1441,7 +1442,8 @@
     Object.entries(costos).forEach(([k, c]) => { U["dashboard_local_costos/" + k] = { ...c, fecha: hasta }; });
     const categorias = {};
     let facturacion = 0, unidades = 0;
-    items.forEach(it => { const cat = categorizarDescripcionLocal(it.d); const e = categorias[cat] || { facturacion: 0, unidades: 0 };
+    // Firebase no acepta "/" en las claves: se guarda con "_" y se vuelve a "/" al leer.
+    items.forEach(it => { const cat = categorizarDescripcionLocal(it.d).replace(/[.#$\/\[\]]/g, "_"); const e = categorias[cat] || { facturacion: 0, unidades: 0 };
       e.facturacion += it.f; e.unidades += it.u; categorias[cat] = e; facturacion += it.f; unidades += it.u; });
     U["dashboard_objetivos/local/semanas/" + objKey] = { facturacion, unidades, categorias, cargaId: id, desde, hasta };
     await db.ref().update(U);
