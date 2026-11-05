@@ -1223,6 +1223,8 @@
   let localCargas = {}, localLegacy = null, localCostos = {}, localDataKey = "";
   const FOCO_CANALES = [["web", "Web"], ["local", "Local"], ["todo", "Todo"]];
   db.ref("dashboard_local").on("value", s => { localLegacy = s.val(); localRecalc(true); if (data) renderFoco(); });
+  let stockActual = null;
+  db.ref("dashboard_stock/actual").on("value", s => { stockActual = s.val(); if (data) renderFoco(); try { lcRenderObj(); } catch (e) {} });
   db.ref("dashboard_local_cargas").on("value", s => { localCargas = s.val() || {}; localRecalc(true); if (data) renderFoco(); try { lcRenderObj(); } catch (e) {} });
   db.ref("dashboard_local_costos").on("value", s => { localCostos = s.val() || {}; localIdx = null; if (data) renderFoco(); });
   const lcDiasRango = (d, h) => Math.max(1, Math.round((new Date(h) - new Date(d)) / 86400000) + 1);
@@ -1446,6 +1448,13 @@
     const { items, costos, tipos, coloresRotos } = await lcLeer(files, desde);
     if (!items.length) throw new Error("No encontré artículos en los archivos.");
     const pisadas = lcListaCargas().filter(c => c.id !== "legacy" && !(hasta < c.desde || desde > c.hasta));
+    // Ganancia sola sobre semanas ya cargadas: solo actualiza costos. No pisa las cargas (perderían color y talle).
+    if (!tipos.includes("ranking") && pisadas.length) {
+      const Uc = {}; Object.entries(costos).forEach(([k, c]) => { Uc["dashboard_local_costos/" + k] = { ...c, fecha: hasta }; });
+      if (!Object.keys(Uc).length) throw new Error("El archivo no trae costos.");
+      await db.ref().update(Uc);
+      return { items, costos, tipos, soloCostos: true, facturacion: 0, unidades: 0, coloresRotos: 0 };
+    }
     if (pisadas.length && !confirm(`Esta carga se superpone con ${pisadas.map(c => lcRangoTxt(c)).join(", ")}. Se reemplaza${pisadas.length > 1 ? "n" : ""} por la nueva. ¿Seguimos?`)) throw new Error("Cancelado.");
     const id = desde + "_" + hasta, ahora = new Date().toISOString(), U = {};
     pisadas.forEach(c => { U["dashboard_local_cargas/" + c.id] = null; if (c.objKey) U["dashboard_objetivos/local/semanas/" + c.objKey] = null; });
@@ -1471,6 +1480,40 @@
     db.ref().update(U);
   }
   // Panel de carga (el mismo en Foco y en Objetivos). pre = prefijo de ids.
+  // ---- Stock de la semana: planilla de Ninox con hojas de Nina y de Avellaneda (se usa "Cantidad", sin lo reservado) ----
+  // dashboard_stock/actual = la última foto · dashboard_stock/historial/<fecha> = totales de cada semana.
+  async function lcLeerStock(file) {
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array" }), m = new Map(); let hojasN = 0, hojasA = 0;
+    wb.SheetNames.forEach(nombre => {
+      const suc = lcNorm(nombre).includes("avellaneda") ? "a" : lcNorm(nombre).includes("nina") ? "n" : null;
+      if (!suc) return;
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, defval: null });
+      const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad"));
+      if (h < 0) return;
+      const col = t => rows[h].findIndex(c => lcNorm(c) === t), iK = col("codigo"), iD = col("descripcion"), iQ = col("cantidad"), iC = col("costo cantidad"), iPC = col("p costo"), iPV = col("p venta");
+      if (suc === "a") hojasA++; else hojasN++;
+      rows.slice(h + 1).forEach(r => {
+        if (!r || r[iK] == null || String(r[iK]).trim() === "") return;
+        const d = iD >= 0 && r[iD] != null ? String(r[iD]).trim() : "";
+        if (/^(devoluciones|etiquetado|venta|articulo con fallas?)$/i.test(d)) return;
+        const k = String(r[iK]).trim(), e = m.get(k) || { k, d, n: 0, a: 0, co: 0, pc: 0, pv: 0 };
+        e[suc] += parseNumAR(r[iQ]);
+        if (iC >= 0) e.co += parseNumAR(r[iC]);
+        if (iPC >= 0 && parseNumAR(r[iPC])) e.pc = parseNumAR(r[iPC]);
+        if (iPV >= 0 && parseNumAR(r[iPV])) e.pv = parseNumAR(r[iPV]);
+        m.set(k, e);
+      });
+    });
+    if (!hojasN || !hojasA) throw new Error('El archivo tiene que traer hojas de "Nina" y de "Avellaneda", con las columnas Codigo y Cantidad.');
+    const items = [...m.values()].map(e => ({ ...e, co: Math.round(e.co) })), sum = c => items.reduce((x, i) => x + (i[c] || 0), 0);
+    return { items, n: sum("n"), a: sum("a"), costo: sum("co") };
+  }
+  async function lcSubirStock(file) {
+    const r = await lcLeerStock(file), fecha = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+    const tot = { fecha, n: r.n, a: r.a, costo: r.costo, articulos: r.items.length };
+    await db.ref().update({ "dashboard_stock/actual": { ...tot, archivo: file.name, cargado: new Date().toISOString(), items: r.items }, ["dashboard_stock/historial/" + fecha]: tot });
+    return tot;
+  }
   function lcPanelHtml(pre) {
     const hoy = new Date(), iso = d => d.toISOString().slice(0, 10);
     const lunesPas = mondayOfWeek(new Date(hoy - 7 * 86400000)), domPas = new Date(lunesPas.getTime() + 6 * 86400000);
@@ -1485,6 +1528,9 @@
         <label class="text-xs">Hasta <input type="date" id="${pre}Hasta" value="${iso(domPas)}" class="border rounded px-2 py-1"></label>
         <input type="file" id="${pre}Files" accept=".pdf,.xlsx,.xls" multiple class="text-xs">
         <button class="pill active" id="${pre}Guardar">Guardar</button><span id="${pre}Msg" class="text-xs"></span></div>
+      <div class="pt-2 border-t border-slate-100 space-y-1"><div class="text-xs font-semibold text-slate-500">Stock de la semana</div>
+        <div class="flex flex-wrap gap-2 items-center"><input type="file" id="${pre}StFile" accept=".xlsx,.xls" class="text-xs"><button class="pill active" id="${pre}StGuardar">Guardar stock</button><span id="${pre}StMsg" class="text-xs"></span></div>
+        <div class="text-xs text-slate-500">${stockActual ? `Último: ${stockActual.fecha.split("-").reverse().join("/")} · Nina ${fmtNum(stockActual.n)} u. · Avellaneda ${fmtNum(stockActual.a)} u. · ${fmtMoney(stockActual.costo)} a costo · ${fmtNum(stockActual.articulos)} artículos` : "Todavía no se cargó ninguno."}</div></div>
       ${cargas.length ? `<div class="pt-2 border-t border-slate-100"><div class="text-xs font-semibold text-slate-500 mb-1">Cargas del local</div>
         <div class="space-y-1">${cargas.slice(0, 12).map(c => { const u = (c.items || []).reduce((s, i) => s + (i.u || 0), 0), f = (c.items || []).reduce((s, i) => s + (i.f || 0), 0);
           return `<div class="flex flex-wrap gap-2 items-center text-xs"><span class="w-28">${lcRangoTxt(c)}</span><span class="text-slate-500">${fmtNum(u)} u.${f ? " · " + fmtMoney(f) : ""}${(c.tipos || []).includes("ganancia") ? " · con costo" : ""}${(c.tipos || []).includes("ranking") ? " · con color" : ""}</span><button class="text-red-600 underline" data-lcdel="${focoEsc(c.id)}">borrar</button></div>`; }).join("")}</div></div>` : ""}
@@ -1494,6 +1540,14 @@
     const q = id => document.getElementById(pre + id);
     document.querySelectorAll(`[data-lcq="${pre}"]`).forEach(b => b.onclick = () => { q("Desde").value = b.dataset.d; q("Hasta").value = b.dataset.h; });
     document.querySelectorAll("[data-lcdel]").forEach(b => b.onclick = () => lcBorrar(b.dataset.lcdel));
+    if (q("StGuardar")) q("StGuardar").onclick = async () => {
+      const f = (q("StFile").files || [])[0], m = q("StMsg");
+      if (!f) { m.textContent = "Elegí el archivo primero."; m.style.color = "#b91c1c"; return; }
+      m.textContent = "Leyendo…"; m.style.color = "#64748b"; q("StGuardar").disabled = true;
+      try { const t = await lcSubirStock(f); const m2 = q("StMsg"); if (m2) { m2.style.color = "#15803d"; m2.textContent = `✓ Guardado: Nina ${fmtNum(t.n)} u. · Avellaneda ${fmtNum(t.a)} u.`; } }
+      catch (e) { const m2 = q("StMsg"); if (m2) { m2.style.color = "#b91c1c"; m2.textContent = "No se pudo cargar: " + e.message; } }
+      if (q("StGuardar")) q("StGuardar").disabled = false;
+    };
     if (!q("Guardar")) return;
     q("Guardar").onclick = async () => {
       const files = Array.from(q("Files").files || []), msg = q("Msg");
@@ -1502,6 +1556,7 @@
       if (!d || !h || d > h) { msg.textContent = "Revisá las fechas."; msg.style.color = "#b91c1c"; return; }
       msg.textContent = "Leyendo…"; msg.style.color = "";
       try { const r = await localSubir(files, d, h);
+        if (r.soloCostos) { const m = q("Msg"); if (m) { m.style.color = "#15803d"; m.textContent = `✓ Costos actualizados de ${fmtNum(Object.keys(r.costos).length)} artículos. Las cargas de esas semanas no se tocaron.`; } return; }
         const sinCosto = !r.tipos.includes("ganancia") ? " Sin archivo de Ganancia: se usa el último costo conocido." : "";
         const sinColor = !r.tipos.includes("ranking") ? " Sin Ranking: no hay color del local en esta carga." : r.coloresRotos ? " Atención: este archivo vino sin colores. Subí el PDF." : "";
         msg.style.color = "#15803d"; msg.textContent = `✓ ${r.items.length} artículos · ${fmtNum(r.unidades)} u. · ${fmtMoney(r.facturacion)}.${sinCosto}${sinColor}`;
