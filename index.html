@@ -1194,7 +1194,34 @@
   // "Más vendidos" automático: los más vendidos de 30 días con stock (top CL_TOP), de cualquier grupo.
   function clTopVentas() { return clProds().filter(p => !(clDe(p) || {}).rechazado && (p.stockTotal || 0) > 0 && clVend(p, "30dias") > 0).sort((a, b) => clVend(b, "30dias") - clVend(a, "30dias")).slice(0, CL_TOP); }
   const clDias = iso => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
-  function clEstado(p) { const st = p.stockTotal || 0, v = clVend(p); if (st <= 0) return "sin"; if (v >= 5 && st <= Math.max(10, v)) return "rep"; return ""; }
+  // ---- Stock real del Foco: Nina = stock de Tienda Nube (al momento); Avellaneda = planilla de la semana ----
+  const stNorm = c => String(c == null ? "" : c).toUpperCase().trim().replace(/-/g, "").replace(/^0+(?=.)/, "");
+  const stCodigo = p => { const s = (p.variantes || []).map(v => v.sku).find(Boolean); return s ? String(s).split("|")[0] : ""; };
+  let stIdxBase = null, stIdx = new Map();
+  function stItem(p) {
+    if (!stockActual || !stockActual.items) return null;
+    if (stIdxBase !== stockActual) { stIdx = new Map(); stockActual.items.forEach(i => { if (i) stIdx.set(stNorm(i.k), i); }); stIdxBase = stockActual; }
+    const c = stNorm(stCodigo(p));
+    return stIdx.get(c) || null;
+  }
+  const stAvellaneda = p => { const i = stItem(p); return i ? (i.a || 0) : 0; };
+  const focoStock = p => { const w = p.stockTotal || 0; if (!stockActual || focoCanal === "web") return w; return focoCanal === "local" ? stAvellaneda(p) : w + stAvellaneda(p); };
+  // Cortes en curso, leídos de la app de fábrica.
+  // De más avanzado a menos: si un código tiene varios cortes, se muestra el más cerca de entrar.
+  const CORTE_ETAPAS = [["-OyK-CY2ge_5HrNA29GC", "mejora"], ["-OyJYMpvmJ3HFJv7LLk6", "revisión final"], ["fabrica_taller_terminacion", "en terminación"], ["fabrica_estampado_taller", "en estampa"], ["s6", "en taller"], ["s5", "en taller"], ["sLT", "por sacar a taller"], ["s4", "listo para taller"], ["s3", "por cortar"], ["-OyJXEFSAun4hYqJ3RDM", "pendiente tizada"]];
+  let cortesCurso = new Map();
+  db.ref("fabrica_v5/sections").once("value").then(snap => { const sec = snap.val() || {}, m = new Map();
+    CORTE_ETAPAS.forEach(([k, etapa]) => { const it = (sec[k] && sec[k].items) || {}; (Array.isArray(it) ? it : Object.values(it)).forEach(x => {
+      if (!x || !x.code || /mini/i.test(x.marca || "") || x.es_complemento) return;
+      const c = stNorm(x.code), e = m.get(c);
+      if (e) e.n++; else m.set(c, { t: `Corte ${String(x.numero_corte || "").replace(/^Corte\s*/i, "")} · ${etapa}`, n: 1 }); }); });
+    cortesCurso = m; if (data) renderFoco(); }).catch(() => {});
+  const flCorte = p => { const e = cortesCurso.get(stNorm(stCodigo(p))); return !e ? "" : e.n > 1 ? `${e.t} (+${e.n - 1} más)` : e.t; };
+  // Días de stock debajo de los cuales hay que reponer: 5 semanas en remeras y tops, 4 en el resto.
+  const flDiasReponer = p => /^(remera|top)/i.test(flCat(p)) ? 35 : 28;
+  // No se sugiere reponer: Sale ni artículos de invierno.
+  const flNoReponer = p => (clDe(p) || {}).grupo === "Sale" || /^(buzo|campera|sweater)/i.test(flCat(p)) || /cardigan|sweater|bomber/i.test(p.producto || "");
+  function clEstado(p) { const st = focoStock(p), v = focoVendC(p); if (st <= 0) return "sin"; if (v >= 5 && st <= Math.max(10, v)) return "rep"; return ""; }
   // ---- Empujar: días de stock al ritmo de venta del período elegido en el Foco ----
   const FOCO_EMPUJAR_DIAS = 45; // desde cuántos días de stock se marca "Empujar"
   let focoOrden = "vend"; // vend | dias | stock
@@ -1202,7 +1229,7 @@
   const FOCO_ORDENES = [["vend", "Más vendidos"], ["dias", "Más días de stock"], ["stock", "Más stock"]];
   const focoPerDias = () => (data && data.periodosDias && data.periodosDias[focoPeriodo]) || parseInt(focoPeriodo) || 30;
   // Días de stock (Infinity si tiene stock y no vendió nada en el período; null si no tiene stock).
-  function focoDiasStock(p) { const st = p.stockTotal || 0, v = focoVendC(p); if (st <= 0) return null; return v > 0 ? st / (v / focoPerDias()) : Infinity; }
+  function focoDiasStock(p) { const st = focoStock(p), v = focoVendC(p); if (st <= 0) return null; return v > 0 ? st / (v / focoPerDias()) : Infinity; }
   // Un producto recién entrado no se marca como clavado aunque todavía no venda.
   const focoEsNuevo = p => { const d = clDias(p.creado); return d != null && d <= CL_NEWIN_DIAS; };
   // "emp" = empujar (muchos días de stock) · "sv" = sin ventas en el período (con stock y no es nuevo)
@@ -1693,7 +1720,7 @@
     if (focoModo === "grupo") {
       // "Más vendidos" con la venta del canal elegido (30 días, igual que en Clasificar).
       const v30 = p => (focoCanal === "local" ? 0 : clVend(p, "30dias")) + (focoCanal === "web" || !localData ? 0 : ((localIndice().porProd.get(p.id) || {}).u || 0) * 30 / localDias());
-      const topIds = new Set(clProds().filter(p => !(clDe(p) || {}).rechazado && (p.stockTotal || 0) > 0 && v30(p) > 0).sort((a, b) => v30(b) - v30(a)).slice(0, CL_TOP).map(p => p.id));
+      const topIds = new Set(clProds().filter(p => !(clDe(p) || {}).rechazado && (focoStock(p)) > 0 && v30(p) > 0).sort((a, b) => v30(b) - v30(a)).slice(0, CL_TOP).map(p => p.id));
       secciones = [["Más vendidos", p => topIds.has(p.id)], ...CL_GRUPOS.map(g => [g, p => clGrupo(p) === g])]; }
     else if (focoModo === "tendencia") secciones = clCfg.tendencias.map(t => [t, p => !!(clDe(p).tendencias || {})[clKey(t)]]);
     else secciones = clCfg.bases.map(b => [b, p => clDe(p).base === b]);
@@ -1703,20 +1730,20 @@
     if (!secciones.length) { cont.innerHTML = aviso + '<div class="card p-4 text-sm text-slate-500">Todavía no hay tendencias creadas. Se crean desde Clasificar.</div>'; return; }
     cont.innerHTML = aviso + secciones.map(([nom, fn]) => {
       let ps = asig.filter(fn);
-      const total = ps.length, sinN = ps.filter(p => (p.stockTotal || 0) <= 0).length;
-      const stockTot = ps.reduce((s, p) => s + (p.stockTotal || 0), 0), vendTot = Math.round(ps.reduce((s, p) => s + focoVendC(p), 0));
+      const total = ps.length, sinN = ps.filter(p => (focoStock(p)) <= 0).length;
+      const stockTot = ps.reduce((s, p) => s + (focoStock(p)), 0), vendTot = Math.round(ps.reduce((s, p) => s + focoVendC(p), 0));
       const basesHay = focoModo === "categoria" ? [] : clCfg.bases.filter(b => ps.some(p => clDe(p).base === b));
       const bf = focoBaseFiltro[nom] || "";
       if (bf) ps = ps.filter(p => clDe(p).base === bf);
-      if (focoOcultarSin) ps = ps.filter(p => (p.stockTotal || 0) > 0);
+      if (focoOcultarSin) ps = ps.filter(p => (focoStock(p)) > 0);
       const dsOrd = p => { const d = focoDiasStock(p); return d == null ? -1 : d === Infinity ? 1e9 : d; };
       const crit = focoOrden === "dias" ? (a, b) => dsOrd(b) - dsOrd(a)
-        : focoOrden === "stock" ? (a, b) => (b.stockTotal || 0) - (a.stockTotal || 0) || focoVendC(b) - focoVendC(a)
-        : (a, b) => focoVendC(b) - focoVendC(a) || (b.stockTotal || 0) - (a.stockTotal || 0);
-      ps.sort((a, b) => ((b.stockTotal || 0) > 0) - ((a.stockTotal || 0) > 0) || crit(a, b));
+        : focoOrden === "stock" ? (a, b) => focoStock(b) - focoStock(a) || focoVendC(b) - focoVendC(a)
+        : (a, b) => focoVendC(b) - focoVendC(a) || focoStock(b) - focoStock(a);
+      ps.sort((a, b) => (focoStock(b) > 0) - (focoStock(a) > 0) || crit(a, b));
       const empN = ps.filter(p => focoEmpuje(p)).length, repN = ps.filter(p => clEstado(p) === "rep").length;
       const paraEmpujar = ps.filter(p => focoEmpuje(p)).sort((a, b) => dsOrd(b) - dsOrd(a)).slice(0, 6);
-      const card = p => { const e = clEstado(p), em = focoEmpuje(p), ds = e === "rep" ? (clVend(p) > 0 ? (p.stockTotal || 0) / (clVend(p) / focoPerDias()) : null) : focoDiasStock(p);
+      const card = p => { const e = clEstado(p), em = focoEmpuje(p), ds = focoDiasStock(p);
         const cls = e === "sin" ? "border-red-300 bg-red-50" : e === "rep" ? "border-amber-300 bg-amber-50" : "border-slate-200";
         const sty = em ? "border-color:#8A3B2E;border-width:2px;background:#FBF3EE" : "";
         const col = em ? "#8A3B2E" : e === "rep" ? "#92400e" : "#2D5A3A";
@@ -1724,15 +1751,15 @@
           ${e === "sin" ? '<span class="chip absolute" style="top:12px;left:12px;background:#dc2626;color:#fff">Sin stock</span>' : e === "rep" ? '<span class="chip absolute" style="top:12px;left:12px;background:#f59e0b;color:#fff">Reponer</span>' : em ? `<span class="chip absolute" style="top:12px;left:12px;background:#8A3B2E;color:#fff">${em === "sv" ? "Sin ventas" : "Empujar"}</span>` : ""}
           <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100 mb-2" onerror="this.style.visibility='hidden'" />
           <div class="text-xs font-semibold leading-tight mb-1" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${focoEsc(p.producto)}</div>
-          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(p.stockTotal || 0)}</b> u. web · ${fmtNum(Math.round(focoVendC(p)))} vend.</div>
+          <div class="text-xs text-slate-600 mt-auto"><b>${fmtNum(focoStock(p))}</b> u. web · ${fmtNum(Math.round(focoVendC(p)))} vend.</div>
           ${focoCanal === "todo" && localData ? `<div class="text-[11px] text-slate-400">${fmtNum(clVend(p))} web · ${fmtNum(Math.round(localVend(p)))} local</div>` : ""}
-          ${ds != null && (focoCanal === "web" || e || em) ? `<div class="text-xs font-bold mt-0.5" style="color:${col}">${focoDiasTxt(ds)}${e === "rep" ? " web" : ""}</div>` : ""}
+          ${ds != null && (focoCanal === "web" || e || em) ? `<div class="text-xs font-bold mt-0.5" style="color:${col}">${focoDiasTxt(ds)}</div>` : ""}
           ${e === "rep" ? focoColoresRep(p) : ""}</div>`; };
       const mini = p => { const ds = focoDiasStock(p);
         return `<div class="flex gap-2 items-center rounded-lg p-1.5" style="background:#fff;border:1px solid #EAD8CE">
           <img src="${p.imagen || ""}" class="w-10 aspect-[3/4] object-cover rounded bg-slate-100 shrink-0" onerror="this.style.visibility='hidden'" />
           <div class="min-w-0"><div class="text-[11px] font-semibold truncate">${focoEsc(p.producto)}</div>
-          <div class="text-[11px] text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(Math.round(focoVendC(p)))} vend.</div>
+          <div class="text-[11px] text-slate-500">${fmtNum(focoStock(p))} u. · ${fmtNum(Math.round(focoVendC(p)))} vend.</div>
           <div class="text-[11px] font-bold" style="color:#8A3B2E">${ds === Infinity ? "Sin ventas" : "~" + Math.round(ds) + " días"}</div></div></div>`; };
       const franja = paraEmpujar.length ? `<div class="rounded-xl p-3 mb-3" style="background:#F7EDE6;border:1px solid #E9CFC2">
           <div class="flex justify-between items-baseline flex-wrap gap-1 mb-2"><div class="text-sm font-bold" style="color:#8A3B2E">Para empujar en ${focoEsc(nom)}</div><div class="text-[11px]" style="color:#7A5A50">Los de más días de stock · los sin ventas primero</div></div>
@@ -1747,21 +1774,22 @@
 
   // ---------------- Foco en lista (oct 2026): reponer y empujar en un solo análisis ----------------
   // Un estado por artículo, con los días de stock al ritmo de venta del período (web + local según "Ventas de"):
-  //   Sin stock · Reponer (< FL_REPONER días: lo que tarda reponer + margen) · OK · Empujar (≥ FL_EMPUJAR) ·
+  //   Sin stock · Reponer (< flDiasReponer: 5 semanas remeras/tops, 4 el resto) · Destrabar (igual, con corte en curso) · OK · Empujar (≥ FL_EMPUJAR) ·
   //   Clavado (≥ FL_CLAVADO o sin ventas). Lo que ingresó hace ≤ CL_NEWIN_DIAS días no se marca Empujar/Clavado.
   // Último ingreso: Logística de Fábrica v2 (fabrica_v5/logistica/items cerrados: cortes y prendas de proveedor),
   // cruzado por código = inicio del SKU de Tienda Nube (o nombre igual si no tiene código). Si no hay, alta en TN.
-  const FL_REPONER = 25, FL_EMPUJAR = 60, FL_CLAVADO = 200;
+  const FL_EMPUJAR = 60, FL_CLAVADO = 200;
   const FL_ESTADOS = {
     sin: { l: "Sin stock", c: "#dc2626", bg: "#fef2f2" },
     rep: { l: "Reponer", c: "#d97706", bg: "#fffbeb" },
+    cur: { l: "Destrabar", c: "#0f766e", bg: "#f0fdfa" },
     ok: { l: "OK", c: "#16a34a", bg: "" },
     nuevo: { l: "Nuevo", c: "#2563eb", bg: "" },
     rein: { l: "Reingreso", c: "#0891b2", bg: "" },
     emp: { l: "Empujar", c: "#8A3B2E", bg: "#fbf3ee" },
     clav: { l: "Clavado", c: "#581c87", bg: "#faf5ff" },
   };
-  const FL_ORDEN_EST = ["rep", "sin", "clav", "emp", "nuevo", "rein", "ok"];
+  const FL_ORDEN_EST = ["rep", "cur", "sin", "clav", "emp", "nuevo", "rein", "ok"];
   let focoVista = "lista", flFiltro = "todos", logiItems = null, flIngIdx = null;
   db.ref("dashboard_foco/vista").on("value", s => { if (s.val()) focoVista = s.val(); if (data) renderFoco(); });
   db.ref("fabrica_v5/logistica/items").on("value", s => { logiItems = s.val() || {}; flIngIdx = null; if (data) renderFoco(); }, () => { logiItems = {}; });
@@ -1788,7 +1816,7 @@
         const pal = clNorm(it.name).split(/[^a-z0-9]+/).filter(w => w.length >= 4 && !["remera", "clasica", "algodon", "lycra"].includes(w));
         const porNombre = pal.length ? hits.filter(x => pal.every(w => x.nom.includes(w))) : [];
         if (porNombre.length) return porNombre.map(x => x.p);
-        return hits.filter(x => (x.p.stockTotal || 0) > 0).map(x => x.p);
+        return hits.filter(x => (focoStock(x.p)) > 0).map(x => x.p);
       }
       const n = clNorm(it.name);
       return n ? porSku.filter(x => x.nom === n).map(x => x.p) : [];
@@ -1809,15 +1837,16 @@
   const flEsReingreso = p => { const i = flIngreso(p); if (!i || i.origen === "tn" || !p.creado) return false; return (i.fecha - new Date(p.creado).getTime()) / 86400000 > CL_NEWIN_DIAS; };
   const flDiasIng = p => { const i = flIngreso(p); return i ? Math.floor((Date.now() - i.fecha) / 86400000) : null; };
   function flEstado(p) {
-    const st = p.stockTotal || 0; if (st <= 0) return "sin";
+    const st = focoStock(p), corte = flCorte(p), noRep = flNoReponer(p);
+    if (st <= 0) return corte && !noRep ? "cur" : "sin";
     const ds = focoDiasStock(p), di = flDiasIng(p), nuevo = di != null && di <= CL_NEWIN_DIAS;
-    if (ds !== Infinity && ds < FL_REPONER) return "rep";
+    if (ds !== Infinity && ds < flDiasReponer(p)) { if (noRep) return "ok"; return corte ? "cur" : "rep"; }
     if (nuevo) return flEsReingreso(p) ? "rein" : "nuevo";
     if (ds === Infinity || ds >= FL_CLAVADO) return "clav";
     if (ds >= FL_EMPUJAR) return "emp";
     return "ok";
   }
-  const flCodigo = p => { const s = (p.variantes || []).map(v => v.sku).find(Boolean); return s ? String(s).split(/[-_ /]/)[0] : ""; };
+  const flCodigo = stCodigo;
   const flFecha = ms => { const d = new Date(ms); return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "2-digit" }); };
   const flCat = p => (clDe(p) || {}).base || p.categoria || "Sin categoría";
   function flPeriodoTxt() {
@@ -1827,7 +1856,9 @@
     const canal = focoCanal === "web" ? "web" : focoCanal === "local" ? "local" : "web + local";
     let t = `📅 Ventas ${canal} del <b>${f(desde)}</b> al <b>${f(hasta)}</b> (${dias} días)`;
     if (focoCanal !== "web") t += localData ? ` · Local: ${localData.cargas > 1 ? localData.cargas + " cargas" : "carga"} del ${fl(localData.desde)} al ${fl(localData.hasta)}${localDias() !== dias ? `, llevado a ${dias} días` : ""}` : ` · <span style="color:#b45309">sin reporte del local cargado</span>`;
-    return t + ` · Stock: web`;
+    if (!stockActual || focoCanal === "web") return t + ` · Stock: web`;
+    const fs = stockActual.fecha.split("-").reverse().slice(0, 2).join("/");
+    return t + (focoCanal === "local" ? ` · Stock: Avellaneda (planilla del ${fs})` : ` · Stock: Nina + Avellaneda (planilla del ${fs})`);
   }
   function flFila(p, topIds) {
     const e = flEstado(p), E = FL_ESTADOS[e], ds = focoDiasStock(p), ing = flIngreso(p);
@@ -1837,8 +1868,8 @@
     return `<tr style="background:${E.bg};box-shadow:inset 4px 0 0 ${E.c}" class="border-b border-slate-100 align-top cursor-pointer hover:brightness-95" data-prodopen="${p.id}">
       <td class="py-2 pl-3 pr-2"><img src="${p.imagen || ""}" class="w-11 aspect-[3/4] object-cover rounded bg-slate-100" loading="lazy" onerror="this.style.visibility='hidden'"></td>
       <td class="py-2 pr-2"><div class="font-semibold text-slate-800 leading-tight">${focoEsc(p.producto)}${topIds.has(p.id) ? ` <span title="Top ${CL_TOP} más vendidos (30 días)">⭐</span>` : ""}</div>
-        <div class="text-[11px] text-slate-400">${focoEsc(flCodigo(p))}${clDe(p) && clDe(p).base ? "" : ` · <span style="color:#b45309">sin clasificar</span>`}</div>${rep}</td>
-      <td class="py-2 pr-2 text-right font-bold">${fmtNum(p.stockTotal || 0)}</td>
+        <div class="text-[11px] text-slate-400">${focoEsc(flCodigo(p))}${clDe(p) && clDe(p).base ? "" : ` · <span style="color:#b45309">sin clasificar</span>`}</div>${flCorte(p) ? `<div class="text-[11px] font-semibold" style="color:#0f766e">${focoEsc(flCorte(p))}</div>` : ""}${rep}</td>
+      <td class="py-2 pr-2 text-right font-bold">${fmtNum(focoStock(p))}${stockActual && focoCanal === "todo" ? `<div class="text-[10px] font-normal text-slate-400 whitespace-nowrap">Nina ${fmtNum(p.stockTotal || 0)} · Av. ${fmtNum(stAvellaneda(p))}</div>` : ""}</td>
       ${focoCanal !== "local" ? `<td class="py-2 pr-2 text-right">${fmtNum(vw)}</td>` : ""}
       ${focoCanal !== "web" ? `<td class="py-2 pr-2 text-right">${localData ? fmtNum(Math.round(vl)) : "—"}</td>` : ""}
       ${focoCanal === "todo" ? `<td class="py-2 pr-2 text-right font-semibold">${fmtNum(Math.round(vt))}</td>` : ""}
@@ -1858,9 +1889,9 @@
     const cont = document.getElementById("focoLista");
     const base = clProds().filter(p => !(clDe(p) || {}).rechazado);
     const v30 = p => (focoCanal === "local" ? 0 : clVend(p, "30dias")) + (focoCanal === "web" || !localData ? 0 : ((localIndice().porProd.get(p.id) || {}).u || 0) * 30 / localDias());
-    const topIds = new Set(base.filter(p => (p.stockTotal || 0) > 0 && v30(p) > 0).sort((a, b) => v30(b) - v30(a)).slice(0, CL_TOP).map(p => p.id));
+    const topIds = new Set(base.filter(p => (focoStock(p)) > 0 && v30(p) > 0).sort((a, b) => v30(b) - v30(a)).slice(0, CL_TOP).map(p => p.id));
     // Solo lo que tiene foco: clasificado (con categoría) y no rechazado. El ⭐ se sigue calculando sobre todo lo publicado.
-    let ps = clAsignados().filter(p => !focoOcultarSin || (p.stockTotal || 0) > 0);
+    let ps = clAsignados().filter(p => !focoOcultarSin || (focoStock(p)) > 0);
     const cuenta = {}; ps.forEach(p => { const e = flEstado(p); cuenta[e] = (cuenta[e] || 0) + 1; });
     const filtros = [["todos", "Todos", ps.length], ...FL_ORDEN_EST.map(k => [k, FL_ESTADOS[k].l, cuenta[k] || 0])];
     const psTodos = ps;
@@ -1869,9 +1900,9 @@
     const vt = p => focoVendC(p);
     const crit = focoModo === "ingreso" ? (a, b) => ((flIngreso(b) || {}).fecha || 0) - ((flIngreso(a) || {}).fecha || 0)
       : focoOrden === "dias" ? (a, b) => dsOrd(b) - dsOrd(a)
-      : focoOrden === "stock" ? (a, b) => (b.stockTotal || 0) - (a.stockTotal || 0) || vt(b) - vt(a)
+      : focoOrden === "stock" ? (a, b) => focoStock(b) - focoStock(a) || vt(b) - vt(a)
       : focoOrden === "estado" ? (a, b) => FL_ORDEN_EST.indexOf(flEstado(a)) - FL_ORDEN_EST.indexOf(flEstado(b)) || vt(b) - vt(a)
-      : (a, b) => vt(b) - vt(a) || (b.stockTotal || 0) - (a.stockTotal || 0);
+      : (a, b) => vt(b) - vt(a) || focoStock(b) - focoStock(a);
     // Secciones según "Ver por"
     let claveDe, ordenSec = null;
     if (focoModo === "grupo") { claveDe = p => clGrupo(p) || (clDe(p) && clDe(p).base ? "Sin grupo" : "Sin clasificar"); ordenSec = [...CL_GRUPOS, "Sin grupo", "Sin clasificar"]; }
@@ -1891,10 +1922,10 @@
       <div class="flex flex-wrap gap-1.5 mb-4">${filtros.map(([k, l, n]) => `<button class="pill ${flFiltro === k ? "active" : ""}" data-flf="${k}" ${k !== "todos" && flFiltro !== k ? `style="border-color:${FL_ESTADOS[k].c};color:${FL_ESTADOS[k].c}"` : ""}>${l} · ${n}</button>`).join("")}</div>`;
     const bloques = keys.map(k => {
       const arr = secs.get(k).sort(crit), nom = k.split("|")[0];
-      const st = arr.reduce((s, p) => s + (p.stockTotal || 0), 0), vv = Math.round(arr.reduce((s, p) => s + vt(p), 0)), ff = arr.reduce((s, p) => s + flFact(p), 0);
+      const st = arr.reduce((s, p) => s + (focoStock(p)), 0), vv = Math.round(arr.reduce((s, p) => s + vt(p), 0)), ff = arr.reduce((s, p) => s + flFact(p), 0);
       const conG = arr.filter(p => flGan(p) != null), gg = conG.reduce((s, p) => s + flGan(p), 0), fg = conG.reduce((s, p) => s + flFact(p), 0);
       const c = {}; arr.forEach(p => { const e = flEstado(p); c[e] = (c[e] || 0) + 1; });
-      const res = ["rep", "clav", "emp"].filter(e => c[e]).map(e => `<b style="color:${FL_ESTADOS[e].c}">${c[e]} ${FL_ESTADOS[e].l.toLowerCase()}</b>`).join(" · ");
+      const res = ["rep", "cur", "clav", "emp"].filter(e => c[e]).map(e => `<b style="color:${FL_ESTADOS[e].c}">${c[e]} ${FL_ESTADOS[e].l.toLowerCase()}</b>`).join(" · ");
       const abierto = flAbiertas.has(focoModo + "|" + k);
       return `<details class="card mb-3 overflow-hidden fl-sec" data-flsec="${focoEsc(focoModo + "|" + k)}" ${abierto ? "open" : ""}>
         <summary class="px-4 py-3 flex justify-between items-center flex-wrap gap-x-3 gap-y-1 cursor-pointer select-none" style="list-style:none">
@@ -1923,9 +1954,9 @@
     if (!secs || secs.size < 2) return "";
     const vt = p => focoVendC(p);
     const tot = { u: 0, f: 0, st: 0 };
-    todos.forEach(p => { tot.u += vt(p); tot.f += flFact(p); tot.st += p.stockTotal || 0; });
+    todos.forEach(p => { tot.u += vt(p); tot.f += flFact(p); tot.st += focoStock(p); });
     const filas = [...secs.entries()].map(([k, arr]) => {
-      const u = arr.reduce((s, p) => s + vt(p), 0), f = arr.reduce((s, p) => s + flFact(p), 0), st = arr.reduce((s, p) => s + (p.stockTotal || 0), 0);
+      const u = arr.reduce((s, p) => s + vt(p), 0), f = arr.reduce((s, p) => s + flFact(p), 0), st = arr.reduce((s, p) => s + (focoStock(p)), 0);
       const conG = arr.filter(p => flGan(p) != null), g = conG.reduce((s, p) => s + flGan(p), 0), fg = conG.reduce((s, p) => s + flFact(p), 0);
       return { k, nom: k.split("|")[0], n: arr.length, u, f, st, mg: fg ? g / fg : null };
     });
@@ -1976,14 +2007,14 @@
   // Resumen para decidir por categoría: qué se vende (y qué color empujar/reponer), qué reponer ya y qué no sale.
   function flResumen(arr, nom) {
     const vt = p => focoVendC(p);
-    const conSt = arr.filter(p => (p.stockTotal || 0) > 0);
-    const stTot = arr.reduce((s, p) => s + (p.stockTotal || 0), 0);
+    const conSt = arr.filter(p => focoStock(p) > 0);
+    const stTot = arr.reduce((s, p) => s + focoStock(p), 0);
     const ds = p => { const d = focoDiasStock(p); return d == null ? "" : d === Infinity ? "sin ventas" : "~" + Math.round(d) + " d"; };
     const rk = flRank === "$" ? flFact : flRank === "g" ? (p => { const g = flGan(p); return g == null ? -1e15 : g; }) : vt;
     const top = conSt.filter(p => vt(p) > 0).sort((a, b) => rk(b) - rk(a) || vt(b) - vt(a)).slice(0, 3);
     const repo = arr.filter(p => flEstado(p) === "rep").sort((a, b) => vt(b) - vt(a)).slice(0, 4);
-    const quietos = arr.filter(p => ["clav", "emp"].includes(flEstado(p))).sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0));
-    const clavU = arr.filter(p => flEstado(p) === "clav").reduce((s, p) => s + (p.stockTotal || 0), 0);
+    const quietos = arr.filter(p => ["clav", "emp"].includes(flEstado(p))).sort((a, b) => focoStock(b) - focoStock(a));
+    const clavU = arr.filter(p => flEstado(p) === "clav").reduce((s, p) => s + focoStock(p), 0);
     const pctClav = stTot ? Math.round(clavU / stTot * 100) : 0;
     const nombre = p => `<span class="font-semibold">${focoEsc(p.producto)}</span>`;
     const colTxt = p => { const c = flColores(p); return [c.emp ? `<span style="color:#2D5A3A">↗ Empujá <b>${focoEsc(c.emp.color)}</b> (${fmtNum(c.emp.stock)} u.)</span>` : "", c.rep.length ? `<span style="color:#b91c1c">↻ Reponé ${c.rep.slice(0, 3).map(focoEsc).join(", ")}${c.rep.length > 3 ? "…" : ""}</span>` : ""].filter(Boolean).join(" · "); };
@@ -1991,13 +2022,13 @@
     const vacio = t => `<div class="text-[11px] text-slate-400">${t}</div>`;
     const rankBtns = `<span class="float-right normal-case tracking-normal font-normal">${[["u", "Unidades"], ["$", "$"], ["g", "Ganancia"]].map(([k, l]) => `<button class="px-1.5 rounded ${flRank === k ? "bg-green-600 text-white" : "text-slate-500"}" data-flrank="${k}">${l}</button>`).join("")}</span>`;
     const bVende = top.length ? top.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${(() => { const u = `${fmtNum(Math.round(vt(p)))} u.`, f = fmtMoney(flFact(p)), g = flGan(p), gt = g == null ? "sin costo" : `gan. ${fmtMoney(g)}${flFact(p) ? ` (${Math.round(g / flFact(p) * 100)}%)` : ""}`;
-      return flRank === "$" ? `<b>${f}</b> · ${u} · ${gt}` : flRank === "g" ? `<b>${gt}</b> · ${f} · ${u}` : `<b>${u}</b> · ${f} · ${gt}`; })()} · stock ${fmtNum(p.stockTotal || 0)} · ${ds(p)}</div>${colTxt(p) ? `<div>${colTxt(p)}</div>` : ""}</div>`).join("") : vacio("Nada vendió en el período.");
-    const bRepo = repo.length ? repo.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${ds(p)}</div>${flColores(p).rep.length ? `<div style="color:#b91c1c">↻ ${flColores(p).rep.slice(0, 3).map(focoEsc).join(", ")}</div>` : ""}</div>`).join("") : vacio("Nada para reponer.");
+      return flRank === "$" ? `<b>${f}</b> · ${u} · ${gt}` : flRank === "g" ? `<b>${gt}</b> · ${f} · ${u}` : `<b>${u}</b> · ${f} · ${gt}`; })()} · stock ${fmtNum(focoStock(p))} · ${ds(p)}</div>${colTxt(p) ? `<div>${colTxt(p)}</div>` : ""}</div>`).join("") : vacio("Nada vendió en el período.");
+    const bRepo = repo.length ? repo.map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(focoStock(p))} u. · ${ds(p)}</div>${flColores(p).rep.length ? `<div style="color:#b91c1c">↻ ${flColores(p).rep.slice(0, 3).map(focoEsc).join(", ")}</div>` : ""}</div>`).join("") : vacio("Nada para reponer.");
     const accion = p => { const e = flEstado(p), d = focoDiasStock(p);
       if (e === "clav" && (d === Infinity || d >= FL_CLAVADO * 2)) return `<b style="color:#581c87">Ofertar / sacar</b>`;
       if (e === "clav") return `<b style="color:#581c87">Ofertar o combinar</b>`;
       return `<b style="color:#8A3B2E">Pautar / mostrar más</b>`; };
-    const bQuieto = quietos.length ? quietos.slice(0, 4).map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(Math.round(vt(p)))} vend. · ${ds(p)}</div><div>${accion(p)}</div></div>`).join("") + (quietos.length > 4 ? `<div class="text-[11px] text-slate-400">y ${quietos.length - 4} más</div>` : "") : vacio("Todo se está moviendo.");
+    const bQuieto = quietos.length ? quietos.slice(0, 4).map(p => `<div class="text-[11px] leading-snug mb-1.5">${nombre(p)}<div class="text-slate-500">${fmtNum(focoStock(p))} u. · ${fmtNum(Math.round(vt(p)))} vend. · ${ds(p)}</div><div>${accion(p)}</div></div>`).join("") + (quietos.length > 4 ? `<div class="text-[11px] text-slate-400">y ${quietos.length - 4} más</div>` : "") : vacio("Todo se está moviendo.");
     const veredicto = !stTot ? "Sin stock en la categoría."
       : pctClav >= 40 ? `<b style="color:#581c87">${pctClav}% del stock está clavado</b> (${fmtNum(clavU)} u.). La prioridad es mover eso antes de producir más.`
       : repo.length ? `<b style="color:#d97706">${repo.length > 3 ? "Varios artículos" : repo.length === 1 ? "1 artículo" : repo.length + " artículos"} para reponer</b>${pctClav ? ` · ${pctClav}% del stock clavado` : ""}. No pautes fuerte lo que está por quedarse sin talles.`
@@ -2041,7 +2072,7 @@
       : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido (web, local o las dos, según "Ventas de"). Reponer mira solo la web: se vende online y queda poco cargado. El local se lleva al período como promedio diario del reporte cargado. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
     if (focoModo !== "tn") {
       document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
-      if (esLista) { document.getElementById("focoLeyenda").textContent = `Estados — Reponer: vende y le quedan menos de ${FL_REPONER} días de stock (lo que tarda reponer + margen). OK: ${FL_REPONER} a ${FL_EMPUJAR} días. Empujar: ${FL_EMPUJAR} a ${FL_CLAVADO} días. Clavado: más de ${FL_CLAVADO} días o sin ventas en el período. Nuevo: ingresó hace ${CL_NEWIN_DIAS} días o menos (no se marca Empujar ni Clavado). Reingreso: igual que Nuevo, pero de un producto que ya estaba en la web (volvió a entrar mercadería). Días de stock = stock web ÷ venta diaria del período (web, local o las dos según "Ventas de"). Solo aparecen los artículos clasificados y no rechazados. Último ingreso: cierre del control en Logística de Fábrica (cortes y prendas de proveedor), cruzado por código con el inicio del SKU; si no hay, la fecha de alta en Tienda Nube. ⭐ = top ${CL_TOP} más vendidos de 30 días.`; renderFocoLista(); return; }
+      if (esLista) { document.getElementById("focoLeyenda").textContent = `Estados — Reponer: vende, le queda menos de 5 semanas de stock en remeras y tops o 4 en el resto, y no tiene corte en curso. Destrabar: igual que Reponer o sin stock, pero ya hay un corte en la fábrica: hay que acelerarlo, no cortar otro. OK: desde ese límite hasta ${FL_EMPUJAR} días. Empujar: ${FL_EMPUJAR} a ${FL_CLAVADO} días. Clavado: más de ${FL_CLAVADO} días o sin ventas en el período. Nuevo: ingresó hace ${CL_NEWIN_DIAS} días o menos (no se marca Empujar ni Clavado). Reingreso: igual que Nuevo, pero de un producto que ya estaba en la web (volvió a entrar mercadería). Días de stock = stock (Nina + Avellaneda; lo que no está en la planilla cuenta 0 en Avellaneda) ÷ venta diaria del período (web, local o las dos según "Ventas de"). Solo aparecen los artículos clasificados y no rechazados. Último ingreso: cierre del control en Logística de Fábrica (cortes y prendas de proveedor), cruzado por código con el inicio del SKU; si no hay, la fecha de alta en Tienda Nube. ⭐ = top ${CL_TOP} más vendidos de 30 días.`; renderFocoLista(); return; }
       renderFocoClasif(); return;
     }
     renderFocoTN();
