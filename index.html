@@ -143,9 +143,16 @@
 
     <div class="view" data-view="clasificar">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏷️ Clasificar mercadería</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4">A cada producto: su categoría, un grupo (New In, Colección, Básicos o Sale — uno solo; New In pasa solo a Colección a los 30 días) y las tendencias que quieras. “Más vendido” lo marca la app sola con las ventas de 30 días. Es lo que usa el Foco. Rechazar lo saca del foco.</p>
+      <div class="flex flex-wrap gap-2 items-center mt-2 mb-3"><button class="pill active" data-fmvista="familias">Familias</button><button class="pill" data-fmvista="anterior">Clasificación anterior</button></div>
+      <div id="famBox">
+        <p class="text-sm text-slate-500 mb-4">Cada artículo va en una sola familia, armada por código: base + letra de tela (el número de estampa no cuenta). Los casos que no siguen la regla los movés a mano. Las líneas son etiquetas: un artículo puede tener varias. Solo entran las temporadas que están en la planilla de stock.</p>
+        <div id="famLista"></div>
+      </div>
+      <div id="clasifViejo" style="display:none">
+      <p class="text-sm text-slate-500 mt-1 mb-4">Clasificación anterior (categoría, grupo y tendencias). Queda guardada y el Foco la sigue usando hasta que pasemos el Foco a familias.</p>
       <div class="flex flex-wrap gap-2 items-center mb-4"><div id="clasifTabs" class="flex flex-wrap gap-1.5"></div><input id="clasifBusca" type="text" placeholder="Buscar producto…" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[180px]" /></div>
       <div id="clasifLista" class="space-y-3"></div>
+      </div>
     </div>
 
     <div class="view" data-view="stock">
@@ -1215,7 +1222,7 @@
       if (!x || !x.code || /mini/i.test(x.marca || "") || x.es_complemento) return;
       const c = stNorm(x.code), e = m.get(c);
       if (e) e.n++; else m.set(c, { t: `Corte ${String(x.numero_corte || "").replace(/^Corte\s*/i, "")} · ${etapa}`, n: 1 }); }); });
-    cortesCurso = m; if (data) renderFoco(); }).catch(() => {});
+    cortesCurso = m; if (data) { renderFoco(); try { renderFam(); } catch (e) {} } }).catch(() => {});
   const flCorte = p => { const e = cortesCurso.get(stNorm(stCodigo(p))); return !e ? "" : e.n > 1 ? `${e.t} (+${e.n - 1} más)` : e.t; };
   // Días de stock debajo de los cuales hay que reponer: 5 semanas en remeras y tops, 4 en el resto.
   const flDiasReponer = p => /^(remera|top)/i.test(flCat(p)) ? 35 : 28;
@@ -1251,7 +1258,7 @@
   const FOCO_CANALES = [["web", "Web"], ["local", "Local"], ["todo", "Todo"]];
   db.ref("dashboard_local").on("value", s => { localLegacy = s.val(); localRecalc(true); if (data) renderFoco(); });
   let stockActual = null;
-  db.ref("dashboard_stock/actual").on("value", s => { stockActual = s.val(); if (data) renderFoco(); try { lcRenderObj(); } catch (e) {} });
+  db.ref("dashboard_stock/actual").on("value", s => { stockActual = s.val(); if (data) { renderFoco(); try { renderFam(); } catch (e) {} } try { lcRenderObj(); } catch (e) {} });
   db.ref("dashboard_local_cargas").on("value", s => { localCargas = s.val() || {}; localRecalc(true); if (data) renderFoco(); try { lcRenderObj(); } catch (e) {} });
   db.ref("dashboard_local_costos").on("value", s => { localCostos = s.val() || {}; localIdx = null; if (data) renderFoco(); });
   const lcDiasRango = (d, h) => Math.max(1, Math.round((new Date(h) - new Date(d)) / 86400000) + 1);
@@ -1513,6 +1520,7 @@
     const wb = XLSX.read(await file.arrayBuffer(), { type: "array" }), m = new Map(); let hojasN = 0, hojasA = 0;
     wb.SheetNames.forEach(nombre => {
       const suc = lcNorm(nombre).includes("avellaneda") ? "a" : lcNorm(nombre).includes("nina") ? "n" : null;
+      const temp = lcNorm(nombre).includes("verano") ? "Verano" : lcNorm(nombre).includes("invierno") ? "Invierno" : "";
       if (!suc) return;
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, defval: null });
       const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad"));
@@ -1524,7 +1532,7 @@
         const d = iD >= 0 && r[iD] != null ? String(r[iD]).trim() : "";
         if (/^(devoluciones|etiquetado|venta|articulo con fallas?)$/i.test(d)) return;
         const k = String(r[iK]).trim(), e = m.get(k) || { k, d, n: 0, a: 0, co: 0, pc: 0, pv: 0 };
-        e[suc] += parseNumAR(r[iQ]);
+        e[suc] += parseNumAR(r[iQ]); if (temp && !e.t) e.t = temp;
         if (iC >= 0) e.co += parseNumAR(r[iC]);
         if (iPC >= 0 && parseNumAR(r[iPC])) e.pc = parseNumAR(r[iPC]);
         if (iPV >= 0 && parseNumAR(r[iPV])) e.pv = parseNumAR(r[iPV]);
@@ -1672,6 +1680,7 @@
       </div></div>`;
   }
   function renderClasif() {
+    try { renderFam(); } catch (e) { console.error(e); }
     const cont = document.getElementById("clasifLista"); if (!cont || !data) return;
     const pend = clParaAsignar();
     ["clasifBadge", "clasifBadgeM"].forEach(bid => { const badge = document.getElementById(bid); if (badge) { badge.textContent = pend.length; badge.style.display = pend.length ? "" : "none"; } });
@@ -1712,6 +1721,165 @@
     document.querySelectorAll("[data-clt-tab]").forEach(b => b.onclick = () => { clTab = b.dataset.cltTab; renderClasif(); });
   }
   document.getElementById("clasifBusca").addEventListener("input", e => { clBusca = e.target.value; renderClasif(); });
+
+  // ===================== Familias (clasificación nueva) =====================
+  // Familia = código sin el número de estampa: base + letra de tela (4699A21 -> 4699A).
+  // Firebase: dashboard_familias/art/{código}: {f: claveFamilia, li: {línea: true}}
+  //           dashboard_familias/fam/{claveFamilia}: {n: nombre, tela, creada}
+  //           dashboard_familias/cfg/lineas: [..]
+  // No toca dashboard_clasif: la clasificación anterior queda guardada y el Foco la sigue usando.
+  const FM_LINEAS_DEF = ["Básicos", "Rayas", "Estampas", "Encaje", "Bordados", "Tejidos", "Denim"];
+  let fmArt = {}, fmFam = {}, fmLineas = FM_LINEAS_DEF.slice(), fmVista = "familias", fmTemp = "act", fmCat = "Remera", fmOrd = "acc", fmQ = "", fmOpen = {}, fmSel = {};
+  const fmK = c => stNorm(c).replace(/[.#$\[\]\/]/g, "_");
+  db.ref("dashboard_familias").on("value", s => { const v = s.val() || {}; fmArt = v.art || {}; fmFam = v.fam || {};
+    fmLineas = (v.cfg && v.cfg.lineas && v.cfg.lineas.length) ? v.cfg.lineas : FM_LINEAS_DEF.slice(); if (data) renderFam(); });
+  function fmFamCod(c) { c = stNorm(c);
+    let m = c.match(/^(\d{3,4}[A-Z]+)\d*$/); if (m) return m[1];
+    m = c.match(/^(\d{4})\d{2}$/); if (m) return m[1];
+    return c; }
+  const FM_CATS = [["Remera", /^(remera|remeron|chomba ml|musculosa crop)/i], ["Top", /^(top|musculosa)/i], ["Body", /^body/i], ["Buzo", /^(buzo|chomba lublin)/i], ["Sweater", /^(sweater|polera|super amplio)/i], ["Campera", /^(campera|gamulan|tapado|bomber|piloto|saco|cardigan)/i], ["Jean", /^(jean|bermuda larga)/i], ["Pantalón", /^(pantalon|jogging)/i], ["Short", /^(short|bermuda)/i], ["Vestido", /^(vestido|mono)/i], ["Mini", /^(mini|pollera)/i], ["Bikini", /^(bikini|malla)/i], ["Blazer", /^blazer/i], ["Camisa", /^camisa/i], ["Accesorio", /^(gorr|bufanda|pack)/i], ["Tejidos", /^(chomba|chaleco)/i]];
+  const fmCatDe = p => (clDe(p) || {}).base || (FM_CATS.find(x => x[1].test(p.producto || "")) || ["Otro"])[0];
+  const FM_TELAS = [[/alg(odon|\.)?\s*c(on|\/)?\s*lycra/i, "Algodón c/ Lycra"], [/morley jerry/i, "Morley Jerry"], [/taylor/i, "Morley Taylor"], [/morley poli/i, "Morley Poli"], [/morley diesel/i, "Morley Diesel"], [/ribb janka/i, "Ribb Janka"], [/rib+ carrie/i, "Ribb Carrie"], [/boston ribb/i, "Boston Ribb"], [/westwood/i, "Westwood Ribb"], [/melina/i, "Melina"], [/jersey/i, "Jersey"], [/friza/i, "Friza"], [/rustico/i, "Rústico"], [/lino/i, "Lino"], [/rayon/i, "Rayón"], [/lewis/i, "Lewis"], [/uniqlo/i, "Uniqlo"], [/denim|denin/i, "Denim"], [/creep/i, "Creep"], [/tricot/i, "Tricot"], [/bengalina/i, "Bengalina"]];
+  const fmTelaSug = nombres => { for (const n of nombres) { const t = FM_TELAS.find(x => x[0].test(n)); if (t) return t[1]; } return ""; };
+  function fmLineasSug(p, cat) { const n = p.producto || "", c = stNorm(stCodigo(p)), li = [];
+    const estampa = /^\d{3,4}[A-Z]+\d+$/.test(c) || /^\d{6}$/.test(c), bord = /bordad/i.test(n);
+    if (/raya|rayad|melina|stripes/i.test(n)) li.push("Rayas");
+    if (bord) li.push("Bordados"); else if (estampa || /estampa/i.test(n)) li.push("Estampas");
+    if (/encaje|puntilla/i.test(n)) li.push("Encaje");
+    if (cat === "Tejidos" || cat === "Sweater") li.push("Tejidos");
+    if (cat === "Jean") li.push("Denim");
+    if (!li.length && /^(Remera|Top|Body)$/.test(cat)) li.push("Básicos");
+    return li; }
+  const fmLineasDe = (p, cat) => { const a = fmArt[fmK(stCodigo(p))]; return a && a.li ? Object.keys(a.li).filter(k => k !== "_ninguna").map(clUnkey) : fmLineasSug(p, cat); };
+  const fmFamDe = p => { const a = fmArt[fmK(stCodigo(p))]; return a && a.f ? a.f : fmK(fmFamCod(stCodigo(p))); };
+  function fmNombreSug(key, it) {
+    if (it.length === 1) return it[0].p.producto;
+    const base = it.find(x => fmK(x.c) === key); if (base) return base.p.producto;
+    const pal = it.map(x => String(x.p.producto).split(/\s+/));
+    const comunes = pal[0].filter(w => w.length > 1 && w !== "-" && pal.every(ws => ws.includes(w)));
+    return comunes.length >= 2 ? comunes.join(" ") : "Familia " + key;
+  }
+  const fmEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function fmAccion(s, v, cat) {
+    const lim = /^(Remera|Top|Body)$/.test(cat) ? 35 : 28, inv = /^(Buzo|Sweater|Campera)$/.test(cat);
+    const ch = (t, bg, col, o, d) => ({ t, bg, col, o, d });
+    if (s <= 0 && v <= 0) return ch("Sin movimiento", "#f1f5f9", "#64748b", 4, "—");
+    if (v <= 0) return ch("Frenar, liquidar", "#f3e8ff", "#581c87", 3, "Sin ventas");
+    const d = s / (v / 30), dt = fmtNum(Math.round(d)) + " días";
+    if (d < lim) return inv ? ch("Invierno: no cortar", "#f1f5f9", "#64748b", 2, dt) : ch("Cortar", "#fef3c7", "#92400e", 0, dt);
+    if (d >= 200) return ch("Frenar cortes", "#f3e8ff", "#581c87", 3, dt);
+    if (d >= 60) return ch("Empujar", "#fbeee9", "#8a3b2e", 2, dt);
+    return ch("Sano", "#dcfce7", "#166534", 1, dt);
+  }
+  // Artículos de las temporadas actuales = los que están en la planilla de stock.
+  function fmDatos() {
+    const pv = focoPeriodo, cv = focoCanal; focoPeriodo = "30dias"; focoCanal = "todo";
+    try {
+      const prods = (data && data.productos || []).filter(p => p && p.id != null && stCodigo(p));
+      const act = [], viejos = [];
+      prods.forEach(p => { const it = stItem(p);
+        if (it) { const cat = fmCatDe(p); act.push({ p, c: stCodigo(p), cat, t: it.t || "", s: Math.round(focoStock(p)), v: Math.max(0, Math.round(focoVendC(p))), corte: flCorte(p), li: fmLineasDe(p, cat), f: fmFamDe(p) }); }
+        else if (p.publicado && (p.stockTotal || 0) > 0) viejos.push(p); });
+      return { act, viejos };
+    } finally { focoPeriodo = pv; focoCanal = cv; }
+  }
+  function renderFam() {
+    const cont = document.getElementById("famLista"); if (!cont || !data) return;
+    document.getElementById("famBox").style.display = fmVista === "familias" ? "" : "none";
+    document.getElementById("clasifViejo").style.display = fmVista === "anterior" ? "" : "none";
+    document.querySelectorAll("[data-fmvista]").forEach(b => b.classList.toggle("active", b.dataset.fmvista === fmVista));
+    if (fmVista !== "familias") return;
+    if (!stockActual) { cont.innerHTML = '<div class="card p-4 text-sm text-slate-500">Subí la planilla de stock de la semana (en Objetivos) para armar las familias de las temporadas actuales.</div>'; return; }
+    const { act, viejos } = fmDatos();
+    const temps = [...new Set(act.map(a => a.t).filter(Boolean))].sort();
+    const pill = (attr, val, on, txt) => `<button class="pill ${on ? "active" : ""}" ${attr}="${fmEsc(val)}">${fmEsc(txt)}</button>`;
+    let h = `<div class="flex flex-wrap gap-2 items-center mb-3"><span class="text-xs font-semibold text-slate-500">Temporada</span>${pill("data-fmtemp", "act", fmTemp === "act", "Dos últimas temporadas · " + act.length)}${temps.map(t => pill("data-fmtemp", t, fmTemp === t, t + " · " + act.filter(a => a.t === t).length)).join("")}${pill("data-fmtemp", "old", fmTemp === "old", "Temporadas anteriores · " + viejos.length)}</div>`;
+    if (fmTemp === "old") {
+      h += `<div class="card p-4 text-sm mb-3"><b>${viejos.length} artículos publicados con stock en la web que no están en la planilla de stock.</b> Quedan fuera del análisis hasta decidir qué hacer: liquidar, pasar al local o despublicar.</div>
+        <div class="card p-0 overflow-hidden">${viejos.sort((a, b) => (b.stockTotal || 0) - (a.stockTotal || 0)).map(p => `<div class="flex justify-between gap-3 px-4 py-2 border-b border-slate-100 text-sm"><span><b>${fmEsc(stCodigo(p))}</b> - ${fmEsc(p.producto)}</span><span class="text-slate-500 whitespace-nowrap">${fmtNum(p.stockTotal || 0)} u. web</span></div>`).join("")}</div>`;
+      cont.innerHTML = h; fmBind(cont, act); return;
+    }
+    const base = act.filter(a => fmTemp === "act" || a.t === fmTemp);
+    const catN = {}; base.forEach(a => catN[a.cat] = (catN[a.cat] || 0) + 1);
+    h += `<div class="flex flex-wrap gap-2 items-center mb-3"><span class="text-xs font-semibold text-slate-500">Categoría</span>${pill("data-fmcat", "Todas", fmCat === "Todas", "Todas")}${Object.keys(catN).sort((x, y) => catN[y] - catN[x]).map(c => pill("data-fmcat", c, fmCat === c, c + " · " + catN[c])).join("")}</div>`;
+    h += `<div class="flex flex-wrap gap-2 items-center mb-3"><span class="text-xs font-semibold text-slate-500">Ordenar por</span>${[["acc", "Qué hacer"], ["cod", "Código"], ["vend", "Más vendidos"], ["stock", "Más stock"]].map(o => pill("data-fmord", o[0], fmOrd === o[0], o[1])).join("")}</div>`;
+    h += `<div class="flex flex-wrap gap-2 items-center mb-3"><input id="fmBusca" value="${fmEsc(fmQ)}" placeholder="Buscar por nombre, código o familia" class="border border-slate-200 rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px]">
+      <input id="fmNueva" placeholder="Familia nueva" class="border border-slate-200 rounded-lg px-3 py-2 text-sm w-48"><button class="pill" id="fmCrear">Crear familia</button>
+      <input id="fmNuevaLinea" placeholder="Línea nueva" class="border border-slate-200 rounded-lg px-3 py-2 text-sm w-40"><button class="pill" id="fmCrearLinea">Crear línea</button></div>`;
+    const q = fmQ.trim().toLowerCase();
+    // familias (con todos sus artículos actuales, para el total)
+    const grupos = {}; act.forEach(a => (grupos[a.f] = grupos[a.f] || []).push(a));
+    const nomFam = k => (fmFam[k] && fmFam[k].n) || (grupos[k] ? fmNombreSug(k, grupos[k]) : "Familia " + k);
+    const todasFam = [...new Set(Object.keys(grupos).concat(Object.keys(fmFam)))].map(k => ({ k, n: nomFam(k) })).sort((a, b) => a.n.localeCompare(b.n));
+    const optsFam = sel => todasFam.map(f => `<option value="${fmEsc(f.k)}" ${f.k === sel ? "selected" : ""}>${fmEsc(f.n)}</option>`).join("");
+    const nSel = Object.keys(fmSel).filter(k => fmSel[k]).length;
+    if (nSel) h += `<div class="card p-3 mb-3 flex flex-wrap gap-2 items-center" style="border-color:#4f46e5"><b class="text-sm">${nSel} seleccionados</b><span class="text-xs text-slate-500">Mover a</span><select id="fmMover" class="border border-slate-200 rounded-lg px-2 py-1.5 text-sm"><option value="">Elegir familia</option>${optsFam("")}</select><button class="pill" id="fmLimpiar">Cancelar</button></div>`;
+    const vis = Object.keys(grupos).map(k => {
+      const todos = grupos[k], it = todos.filter(a => (fmTemp === "act" || a.t === fmTemp) && (fmCat === "Todas" || a.cat === fmCat));
+      if (!it.length) return null;
+      const n = nomFam(k);
+      const itQ = q ? it.filter(a => (a.c + " " + a.p.producto + " " + n).toLowerCase().includes(q)) : it;
+      if (!itQ.length) return null;
+      const s = todos.reduce((t, a) => t + a.s, 0), v = todos.reduce((t, a) => t + a.v, 0);
+      const cs = todos.map(a => stNorm(a.c)); let cod = cs[0]; cs.forEach(x => { let i = 0; while (i < cod.length && cod[i] === x[i]) i++; cod = cod.slice(0, i); }); if (cod.length < 3) cod = cs.length > 1 ? "Varios" : cs[0];
+      if (!/^u\d+$/.test(k)) cod = k;
+      return { k, n, cod, it: itQ.sort((x, y) => y.v - x.v), cant: todos.length, s, v, ac: fmAccion(s, v, todos[0].cat), cat: todos[0].cat,
+        lin: [...new Set([].concat(...todos.map(a => a.li)))], tela: (fmFam[k] && fmFam[k].tela) || "", telaSug: fmTelaSug(todos.map(a => a.p.producto)) };
+    }).filter(Boolean).sort((x, y) => fmOrd === "cod" ? x.cod.localeCompare(y.cod, "es", { numeric: true }) : fmOrd === "vend" ? y.v - x.v : fmOrd === "stock" ? y.s - x.s : x.ac.o - y.ac.o || y.s - x.s);
+    const nArt = vis.reduce((t, f) => t + f.it.length, 0);
+    h += `<p class="text-xs text-slate-500 mb-2">${nArt} artículos en ${vis.length} familias. Ventas web + local de los últimos 30 días; stock Nina + Avellaneda. Los totales de cada familia suman todos sus artículos actuales.</p>`;
+    h += `<div class="card p-0 overflow-x-auto"><div style="min-width:980px">
+      <div class="grid gap-3 px-4 py-2 text-[11px] font-semibold text-slate-500 border-b border-slate-200" style="grid-template-columns:minmax(300px,1fr) 70px 80px 90px 170px"><div>Familia / artículo</div><div class="text-right">Stock</div><div class="text-right">Vend. 30 d</div><div class="text-right">Alcanza</div><div>Qué hacer</div></div>`;
+    vis.forEach(F => { const ab = !!fmOpen[F.k];
+      h += `<div class="border-b border-slate-200"><button data-fmtog="${fmEsc(F.k)}" class="grid gap-3 w-full px-4 py-2.5 text-left items-center ${ab ? "bg-slate-50" : "bg-white"}" style="grid-template-columns:minmax(300px,1fr) 70px 80px 90px 170px">
+        <span class="flex gap-2 items-center min-w-0"><span class="text-slate-400 w-3">${ab ? "▾" : "▸"}</span><span class="min-w-0"><span class="font-bold text-sm"><span class="text-slate-500">${fmEsc(F.cod)}</span> - ${fmEsc(F.n)}</span>
+        <span class="block text-[11px] text-slate-500">${fmEsc(F.cat)} · ${F.cant} ${F.cant === 1 ? "artículo" : "artículos"}${F.tela || F.telaSug ? " · " + fmEsc(F.tela || F.telaSug) : ""}${F.lin.length ? " · " + fmEsc(F.lin.join(", ")) : ""}</span></span></span>
+        <span class="text-right font-bold text-sm">${fmtNum(F.s)}</span><span class="text-right font-bold text-sm">${fmtNum(F.v)}</span><span class="text-right text-sm font-semibold">${F.ac.d}</span>
+        <span><span class="chip" style="background:${F.ac.bg};color:${F.ac.col};font-weight:700">${F.ac.t}</span></span></button>`;
+      if (ab) {
+        h += `<div class="flex flex-wrap gap-2 items-center px-4 py-2 pl-9 border-t border-slate-100 bg-slate-50">
+          <label class="text-xs font-semibold text-slate-500 flex items-center gap-2">Nombre<input data-fmnom="${fmEsc(F.k)}" value="${fmEsc(F.n)}" class="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-72 font-normal text-slate-800"></label>
+          <label class="text-xs font-semibold text-slate-500 flex items-center gap-2">Tela<input data-fmtela="${fmEsc(F.k)}" value="${fmEsc(F.tela)}" placeholder="${fmEsc(F.telaSug || "Sin dato")}" class="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-44 font-normal text-slate-800"></label>
+          <button class="pill" data-fmguardar="${fmEsc(F.k)}">Guardar</button></div>`;
+        F.it.forEach(a => { const k = fmK(a.c);
+          h += `<div class="grid gap-3 items-center px-4 py-2 pl-9 border-t border-slate-100 text-sm" style="grid-template-columns:minmax(300px,1fr) 70px 80px 300px">
+            <div class="flex gap-2.5 items-center min-w-0"><input type="checkbox" data-fmsel="${fmEsc(k)}" ${fmSel[k] ? "checked" : ""} class="w-4 h-4" aria-label="Seleccionar ${fmEsc(a.c)}">
+            <div class="min-w-0"><div><b>${fmEsc(a.c)}</b> - ${fmEsc(a.p.producto)}</div><div class="text-[11px] text-slate-500">${fmEsc(a.t || "")}${a.corte ? (a.t ? " · " : "") + fmEsc(a.corte) : ""}</div></div></div>
+            <div class="text-right">${fmtNum(a.s)}</div><div class="text-right">${fmtNum(a.v)}</div>
+            <div class="flex flex-col gap-1.5"><select data-fmmov="${fmEsc(k)}" class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs">${optsFam(a.f)}</select>
+            <div class="flex flex-wrap gap-1">${fmLineas.map(l => { const on = a.li.includes(l); return `<button data-fmli="${fmEsc(k)}" data-v="${fmEsc(l)}" class="pill ${on ? "active" : ""}" style="padding:.2rem .55rem;font-size:.68rem">${fmEsc(l)}</button>`; }).join("")}</div></div></div>`; });
+      }
+      h += `</div>`; });
+    h += `</div></div>`;
+    if (!vis.length) h += '<div class="card p-4 text-sm text-slate-500 mt-2">No hay artículos con ese filtro.</div>';
+    cont.innerHTML = h; fmBind(cont, act);
+  }
+  function fmBind(cont, act) {
+    const byK = {}; act.forEach(a => byK[fmK(a.c)] = a);
+    const on = (sel, fn, ev) => cont.querySelectorAll(sel).forEach(el => el[ev || "onclick"] = () => fn(el));
+    on("[data-fmtemp]", b => { fmTemp = b.dataset.fmtemp; fmOpen = {}; renderFam(); });
+    on("[data-fmcat]", b => { fmCat = b.dataset.fmcat; fmOpen = {}; renderFam(); });
+    on("[data-fmord]", b => { fmOrd = b.dataset.fmord; renderFam(); });
+    on("[data-fmtog]", b => { fmOpen[b.dataset.fmtog] = !fmOpen[b.dataset.fmtog]; renderFam(); });
+    on("[data-fmsel]", el => { fmSel[el.dataset.fmsel] = el.checked; renderFam(); }, "onchange");
+    on("[data-fmmov]", el => { const k = el.dataset.fmmov; db.ref("dashboard_familias/art/" + k + "/f").set(el.value); fmOpen[el.value] = true; }, "onchange");
+    on("[data-fmli]", b => { const k = b.dataset.fmli, a = byK[k], l = b.dataset.v; if (!a) return;
+      const li = a.li.includes(l) ? a.li.filter(x => x !== l) : a.li.concat(l), o = {}; li.forEach(x => o[clKey(x)] = true);
+      db.ref("dashboard_familias/art/" + k + "/li").set(Object.keys(o).length ? o : { _ninguna: true }); });
+    on("[data-fmguardar]", b => { const k = b.dataset.fmguardar;
+      const nom = (cont.querySelector(`[data-fmnom="${CSS.escape(k)}"]`) || {}).value, tela = (cont.querySelector(`[data-fmtela="${CSS.escape(k)}"]`) || {}).value;
+      db.ref("dashboard_familias/fam/" + k).update({ n: String(nom || "").trim() || null, tela: String(tela || "").trim() || null, ts: Date.now() }); });
+    const bus = cont.querySelector("#fmBusca"); if (bus) bus.oninput = () => { fmQ = bus.value; clearTimeout(fmBind.t); fmBind.t = setTimeout(() => { renderFam(); const n = document.getElementById("fmBusca"); if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }, 300); };
+    const cr = cont.querySelector("#fmCrear"); if (cr) cr.onclick = () => { const n = cont.querySelector("#fmNueva").value.trim(); if (!n) return;
+      const k = "u" + Date.now(); db.ref("dashboard_familias/fam/" + k).set({ n, creada: Date.now() }); };
+    const cl = cont.querySelector("#fmCrearLinea"); if (cl) cl.onclick = () => { const n = cont.querySelector("#fmNuevaLinea").value.trim(); if (!n || fmLineas.some(x => x.toLowerCase() === n.toLowerCase())) return;
+      db.ref("dashboard_familias/cfg/lineas").set(fmLineas.concat(n)); };
+    const mv = cont.querySelector("#fmMover"); if (mv) mv.onchange = () => { if (!mv.value) return; const upd = {};
+      Object.keys(fmSel).filter(k => fmSel[k]).forEach(k => upd["art/" + k + "/f"] = mv.value);
+      db.ref("dashboard_familias").update(upd); fmOpen[mv.value] = true; fmSel = {}; };
+    const lp = cont.querySelector("#fmLimpiar"); if (lp) lp.onclick = () => { fmSel = {}; renderFam(); };
+  }
+  document.querySelectorAll("[data-fmvista]").forEach(b => b.onclick = () => { fmVista = b.dataset.fmvista; renderFam(); if (fmVista === "anterior") renderClasif(); });
 
   // Foco con la clasificación propia: por grupo, por tendencia o por categoría base.
   function renderFocoClasif() {
