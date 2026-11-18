@@ -3627,8 +3627,9 @@
   db.ref("dashboard").on("value", (snap) => {
     data = snap.val();
     if (!data) return;
-    { const hs = (Date.now() - new Date(data.actualizado).getTime()) / 3600000, el = document.getElementById("ultimaActualizacion");
-      el.innerHTML = "Actualizado: " + new Date(data.actualizado).toLocaleString("es-AR") + (hs >= 2 ? ` <span style="color:#b45309;font-weight:600">· ⚠️ hace ${Math.floor(hs)} h — el sync de GitHub puede estar demorado o fallando</span>` : ""); }
+    { const pintar = () => { const hs = (Date.now() - new Date(data.actualizado).getTime()) / 3600000, el = document.getElementById("ultimaActualizacion");
+        el.innerHTML = "Actualizado: " + new Date(data.actualizado).toLocaleString("es-AR", { hour12: false }) + (hs >= 2 ? ` <span style="color:#b45309;font-weight:600">· ⚠️ hace ${Math.floor(hs)} h — el sync de GitHub puede estar demorado o fallando</span>` : ""); };
+      pintar(); clearInterval(window._avisoSyncTimer); window._avisoSyncTimer = setInterval(pintar, 5 * 60 * 1000); }
     document.getElementById("loading").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
     renderAll();
