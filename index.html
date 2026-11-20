@@ -4138,6 +4138,8 @@
         const cols = [...new Set(Object.values(it.grilla || {}).map(g => g && g.color).filter(Boolean))];
         if (cols.length && cols.some(c => !(it.web_colores && it.web_colores[slug(c)]))) cm.web.push(f);
       });
+      const div = Object.values(logiItems || {}).filter(it => it && it.estado === "pendiente_dividir" && !it.division_confirmada && !esMini(it));
+      if (div.length) grupos.set("_div", { t: "Cargar división Avellaneda / depósito", n: div.length, dias: Math.max(0, ...div.map(it => Math.floor((Date.now() - (it.fecha_control_cerrado || it.fecha_creado || Date.now())) / 864e5))), atr: false, app: "fabrica" });
       [["costo", "Comercializar: confirmar costo"], ["precio", "Comercializar: cargar precios"], ["web", "Comercializar: subir a la web"]].forEach(([k, t]) => {
         if (cm[k].length) grupos.set("_cm" + k, { t, n: cm[k].length, dias: Math.floor((Date.now() - Math.min(...cm[k])) / 864e5), atr: false, app: "fabrica" });
       });
