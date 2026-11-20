@@ -48,6 +48,7 @@
     <div class="navitem active" data-view="tablero">🧭 Tablero</div>
     <div class="navitem" data-view="dashboard">📊 Cómo vamos</div>
     <div class="navitem" data-view="foco">🔎 Foco</div>
+    <div class="navitem" data-view="frenado">🧊 Stock frenado</div>
     <div class="navitem" data-view="stock">📦 Catálogo</div>
     <div class="navitem" data-view="vendidos">🏆 Vendidos</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
@@ -66,6 +67,7 @@
     <div class="navitem active" data-view="tablero">🧭 Tablero</div>
     <div class="navitem" data-view="dashboard">📊 Cómo vamos</div>
     <div class="navitem" data-view="foco">🔎 Foco</div>
+    <div class="navitem" data-view="frenado">🧊 Stock frenado</div>
     <div class="navitem" data-view="stock">📦 Catálogo</div>
     <div class="navitem" data-view="vendidos">🏆 Vendidos</div>
     <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
@@ -143,6 +145,11 @@
     </div>
 
     <!-- ===================== STOCK GENERAL ===================== -->
+    <div class="view" data-view="frenado">
+      <div style="background:#3F2A2F;color:#fff;font-size:11px;letter-spacing:1px;padding:8px 14px;border-radius:12px;text-transform:uppercase">Stock activo, lento y frenado</div>
+      <div id="frenadoContenido" style="font-family:Inter,sans-serif"></div>
+    </div>
+
     <div class="view" data-view="foco">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🔎 Foco</h1>
       <p class="text-sm text-slate-500 mt-1 mb-4">Lo que clasificaste a mano en 🏷️ Clasificar, por grupo, tendencia o categoría. “Tienda Nube” es la vista anterior, por las categorías de la web.</p>
@@ -4014,7 +4021,7 @@
     const REPONER_DIAS_CUBRIR = 30; // al reponer, cubrir 30 días de venta
     const REPONER_MIN_VENTA_MES = 30; // solo se sugiere reponer lo que se vende bien: 30 u. o más por mes (local + web)
     const REPONER_MIN_SUGERIDO = 10; // no vale la pena sugerir menos de 10 u.
-    let tbPer = "mes", tbPend = null, tbSec = null, tbEgr = null, tbCosteos = null;
+    let tbPer = "mes", tbPend = null, tbSec = null, tbEgr = null, tbCosteos = null, tbAct = null;
     const T = { azul: "#416096", rosa: "#9B5C6B", celeste: "#8FADC5", ciruela: "#3F2A2F" };
     const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const num = n => Math.round(n || 0).toLocaleString("es-AR");
@@ -4235,6 +4242,20 @@
       const p = produccion(r.desde, r.hasta), pa = produccion(r.antDesde, r.antHasta);
       h += tit("Producción · " + esc(r.nom), `<a href="${URL_FABRICA}" target="_blank" rel="noopener" style="text-decoration:none">${ver("Fábrica")}</a>`);
       h += `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${caja("Cortadas", num(p.cort), delta(p.cort, pa.cort))}${caja("Ingresaron", num(p.ing), `<span style="color:${T.rosa}">${num(p.enTaller)} en talleres ahora</span>`)}</div>`;
+      // Equipo: qué cargó cada uno en la app de fábrica esta semana vs la anterior
+      if (tbAct) {
+        const lun = new Date(); lun.setHours(0, 0, 0, 0); lun.setDate(lun.getDate() - ((lun.getDay() + 6) % 7));
+        const ini = lun.getTime(), largo = Date.now() - ini, antIni = ini - 7 * 864e5, antFin = antIni + largo;
+        const per = {};
+        Object.values(tbAct).forEach(x => { if (!x || !x.user || x.user === "Alguien") return; const ts = x.timestamp || 0; const e = per[x.user] = per[x.user] || { s: 0, a: 0, top: {} };
+          if (ts >= ini) { e.s++; e.top[x.action] = (e.top[x.action] || 0) + 1; } else if (ts >= antIni && ts < antFin) e.a++; });
+        const filas = Object.entries(per).filter(([, e]) => e.s || e.a).sort((a, b) => b[1].s - a[1].s);
+        if (filas.length) {
+          h += `<div style="margin-top:14px;font-size:12px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:.4px">Equipo · acciones en la app esta semana</div><div style="border:1px solid #eee;border-radius:12px;overflow:hidden;margin-top:6px">` +
+            filas.map(([u, e]) => { const top = Object.entries(e.top).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, n]) => esc(k.slice(0, 32)) + " " + n).join(" · "); const d = e.a ? Math.round((e.s - e.a) / e.a * 100) : null;
+              return `<div style="display:flex;justify-content:space-between;gap:8px;padding:8px 12px;border-bottom:1px solid #eee;font-size:13px"><span><b>${esc(u)}</b><div style="font-size:11px;color:#888">${top || "—"}</div></span><span style="text-align:right;white-space:nowrap"><b>${e.s}</b>${d != null ? `<div style="font-size:11px;color:${d >= 0 ? "#166534" : "#b91c1c"}">${d >= 0 ? "+" : ""}${d}% vs sem. ant.</div>` : ""}</span></div>`; }).join("") + `</div>`;
+        }
+      }
       brk();
       // Plata
       const vi = valorIngresos(p.ingItems);
@@ -4252,6 +4273,8 @@
       const ritmoMes = (ventaWeb(addD(r.hasta, -29), r.hasta).u + ventaLocal(addD(r.hasta, -29), r.hasta).u) || 0;
       h += tit("Stock", `<span data-goto="foco">${ver("Foco")}</span>`);
       h += `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${caja("Unidades", stockActual ? num(stU) : "—", stockActual ? `${ritmoMes ? "≈ " + (stU / ritmoMes).toLocaleString("es-AR", { maximumFractionDigits: 1 }) + " meses de venta · " : ""}a costo ${plata(stockActual.costo)}` : "Subí la planilla de stock")}${caja("Planilla Ninox", stockActual ? stockActual.fecha.split("-").reverse().slice(0, 2).join("/") : "—", stockActual ? `Nina ${num(stockActual.n)} · Avellaneda ${num(stockActual.a)}` : "")}</div>`;
+      const fr = window.frResumenTablero ? window.frResumenTablero() : null;
+      if (fr) h += `<div data-goto="frenado" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:8px;cursor:pointer">${[["activo", "Activo", T.azul], ["lento", "Lento", "#c08a2b"], ["frenado", "Frenado", T.rosa]].map(([k, l, c]) => `<div style="border:1px solid #eee;border-radius:12px;padding:8px 10px"><div style="font-size:11px;color:${c};font-weight:700">${l}</div><div style="font-size:16px;font-weight:700">${plata(fr[k].c)}</div><div style="font-size:11px;color:#888">${num(fr[k].u)} u.</div></div>`).join("")}</div><div style="font-size:11px;color:#888;margin-top:4px">A costo · ${fr.fuera.n ? fr.fuera.n + " artículos fuera del análisis · " : ""}tocá para ver y elegir qué entra</div>`;
       if (a) {
         h += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${["rep", "sin", "cur", "emp", "clav"].map(k => { const e = FL_ESTADOS[k], n = a.cuenta[k] || 0; return `<button data-tbfoco="${k}" style="padding:5px 12px;border-radius:40px;font-size:12px;border:1px solid ${e.c};color:${e.c};background:#fff">${e.l} · ${n}</button>`; }).join("")}</div>`;
         brk();
@@ -4272,6 +4295,7 @@
     const reRender = () => { clearTimeout(pend); pend = setTimeout(() => { try { render(); } catch (e) { console.error("tablero", e); } }, 150); };
     db.ref("fabrica_v5/pendientes_resumen").on("value", s => { tbPend = s.val() || {}; reRender(); }, () => { tbPend = {}; });
     db.ref("fabrica_v5/sections").on("value", s => { tbSec = s.val() || {}; reRender(); }, () => {});
+    db.ref("fabrica_v5/actividad").limitToLast(2500).once("value").then(s => { tbAct = s.val() || {}; reRender(); }).catch(() => {});
     db.ref("fabrica_v5/costeos").once("value").then(s => { tbCosteos = s.val() || {}; reRender(); }).catch(() => {});
     Promise.all(["programados", "ocurrencias", "egresos"].map(k => db.ref("egresos_v1/" + k).once("value").then(s => s.val() || {}).catch(() => ({}))))
       .then(([programados, ocurrencias, egresos]) => { tbEgr = { programados, ocurrencias, egresos }; reRender(); });
@@ -4279,6 +4303,114 @@
     db.ref("dashboard_stock/actual").on("value", reRender);
     db.ref("dashboard_local_cargas").on("value", reRender);
     db.ref("fabrica_v5/logistica/items").on("value", reRender);
+  })();
+</script>
+<script>
+  // ================= Stock activo / lento / frenado (nov 2026) =================
+  // Toma la planilla de stock de Ninox (Nina + Avellaneda, con costo) y la venta de web (Tienda Nube)
+  // y local (cargas de Ninox). Ariel elige qué artículos entran al análisis: los que saca quedan en
+  // dashboard_stock_excluir/{código} y no suman en ningún total.
+  (function () {
+    let frExcl = {}, frFiltro = "frenado", frCat = "", frBusca = "", frVerFuera = false, frOrden = "costo";
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const num = n => Math.round(n || 0).toLocaleString("es-AR");
+    const plata = n => { n = Math.round(n || 0); return Math.abs(n) >= 1e6 ? "$ " + (n / 1e6).toLocaleString("es-AR", { maximumFractionDigits: 1 }) + " M" : "$ " + n.toLocaleString("es-AR"); };
+    const key = k => String(k).replace(/[.#$/\[\]]/g, "_");
+    const nr = c => String(c == null ? "" : c).toUpperCase().trim().replace(/-/g, "").replace(/^0+(?=.)/, "");
+    const iso = d => d.toISOString().slice(0, 10);
+    const CLASES = { activo: { l: "Activo", c: "#416096", d: "vendió en los últimos 30 días" }, lento: { l: "Lento", c: "#c08a2b", d: "vende poco: más de un año de stock, o sin ventas en 30 días" }, frenado: { l: "Frenado", c: "#9B5C6B", d: "sin ventas en los últimos 60/90 días" } };
+
+    function datos() {
+      if (!stockActual || !stockActual.items) return null;
+      const prods = ((data && data.productos) || []).filter(p => p && p.id != null);
+      const porCod = new Map();
+      prods.forEach(p => { const c = nr(stCodigo(p)); if (c && !porCod.has(c)) porCod.set(c, p); });
+      // Venta local por código: cargas que terminan en los últimos 30 y 90 días
+      const hoy = new Date(), h30 = iso(new Date(hoy - 30 * 864e5)), h90 = iso(new Date(hoy - 90 * 864e5));
+      const loc30 = new Map(), loc90 = new Map(), locUlt = new Map();
+      (typeof lcListaCargas === "function" ? lcListaCargas() : []).forEach(c => {
+        (c.items || []).forEach(it => {
+          const k = nr(it.k), u = it.u || 0; if (!u) return;
+          if (c.hasta >= h30) loc30.set(k, (loc30.get(k) || 0) + u);
+          if (c.hasta >= h90) loc90.set(k, (loc90.get(k) || 0) + u);
+          if (!locUlt.has(k) || c.hasta > locUlt.get(k)) locUlt.set(k, c.hasta);
+        });
+      });
+      return stockActual.items.filter(i => i && ((i.n || 0) + (i.a || 0)) > 0).map(i => {
+        const k = nr(i.k), p = porCod.get(k) || null, st = (i.n || 0) + (i.a || 0);
+        const w30 = p ? clVend(p, "30dias") : 0, w60 = p ? clVend(p, "60dias") : 0;
+        const v30 = w30 + (loc30.get(k) || 0), v90 = w60 + (loc90.get(k) || 0);
+        const ultW = p && p.ventasTotales && p.ventasTotales.ultimaVenta ? String(p.ventasTotales.ultimaVenta).slice(0, 10) : "";
+        const ult = [ultW, locUlt.get(k) || ""].sort().pop() || "";
+        const cob = v30 > 0 ? st / (v30 / 30) : Infinity;
+        const clase = v30 > 0 ? (cob > 365 ? "lento" : "activo") : (v90 > 0 ? "lento" : "frenado");
+        const costo = i.co || (i.pc || 0) * st;
+        return { k: i.k, d: i.d || (p && p.producto) || "", p, st, n: i.n || 0, a: i.a || 0, costo, pv: i.pv || 0, v30, v90, ult, cob, clase,
+          cat: p ? flCat(p) : (i.t ? "Sin publicar · " + i.t : "Sin publicar"), fuera: !!frExcl[key(i.k)] };
+      });
+    }
+    function resumen() {
+      const l = datos(); if (!l) return null;
+      const r = { activo: { u: 0, c: 0, n: 0 }, lento: { u: 0, c: 0, n: 0 }, frenado: { u: 0, c: 0, n: 0 }, fuera: { u: 0, c: 0, n: 0 } };
+      l.forEach(x => { const b = x.fuera ? r.fuera : r[x.clase]; b.u += x.st; b.c += x.costo; b.n++; });
+      return r;
+    }
+    window.frResumenTablero = resumen;
+    function render() {
+      const cont = document.getElementById("frenadoContenido"); if (!cont) return;
+      const l = datos();
+      if (!l) { cont.innerHTML = `<div style="padding:16px;color:#666">Subí la planilla de stock de Ninox (en Objetivos o Foco) para ver el análisis.</div>`; return; }
+      const r = resumen();
+      const caja = (k, t, sub, col, b) => `<button data-frf="${k}" style="text-align:left;flex:1;min-width:150px;border-radius:12px;padding:10px 12px;border:${frFiltro === k ? "2px solid " + col : "1px solid #eee"};background:#fff;cursor:pointer"><div style="font-size:12px;color:${col};font-weight:700">${t}</div><div style="font-size:20px;font-weight:700">${plata(b.c)}</div><div style="font-size:11px;color:#666">${num(b.u)} u. · ${b.n} artículos</div><div style="font-size:11px;color:#999">${sub}</div></button>`;
+      const cats = [...new Set(l.map(x => x.cat))].sort((a, b) => a.localeCompare(b, "es"));
+      let vis = l.filter(x => (frVerFuera ? true : !x.fuera) && (frFiltro === "todos" || (frFiltro === "fuera" ? x.fuera : (!x.fuera && x.clase === frFiltro))) && (!frCat || x.cat === frCat) && (!frBusca || (x.d + " " + x.k).toLowerCase().includes(frBusca.toLowerCase())));
+      vis.sort(frOrden === "unidades" ? (a, b) => b.st - a.st : frOrden === "ult" ? (a, b) => (a.ult || "0").localeCompare(b.ult || "0") : (a, b) => b.costo - a.costo);
+      const tot = vis.reduce((s, x) => s + x.costo, 0);
+      const fila = x => {
+        const cl = CLASES[x.clase], dias = x.ult ? Math.floor((Date.now() - new Date(x.ult + "T12:00:00")) / 864e5) : null;
+        return `<tr style="border-top:1px solid #eee;${x.fuera ? "opacity:.45" : ""}">
+          <td style="padding:6px"><input type="checkbox" data-frx="${esc(x.k)}" ${x.fuera ? "" : "checked"} title="Incluir en el análisis"></td>
+          <td style="padding:6px;width:46px">${x.p && x.p.imagen ? `<img src="${esc(x.p.imagen)}" style="width:40px;height:52px;object-fit:cover;border-radius:6px">` : ""}</td>
+          <td style="padding:6px"><div style="font-weight:600">${esc(x.d)}</div><div style="font-size:11px;color:#888">${esc(x.k)} · ${esc(x.cat)}</div></td>
+          <td style="padding:6px;text-align:right">${num(x.st)}<div style="font-size:11px;color:#888">Nina ${num(x.n)} · Av ${num(x.a)}</div></td>
+          <td style="padding:6px;text-align:right;color:#9B5C6B;font-weight:600">${plata(x.costo)}</td>
+          <td style="padding:6px;text-align:right">${num(x.v30)}<div style="font-size:11px;color:#888">90d: ${num(x.v90)}</div></td>
+          <td style="padding:6px;text-align:right">${x.ult ? x.ult.split("-").reverse().join("/") : "—"}<div style="font-size:11px;color:#888">${dias != null ? "hace " + dias + " días" : "sin ventas registradas"}</div></td>
+          <td style="padding:6px;text-align:right"><span style="font-size:11px;padding:2px 9px;border-radius:40px;background:${cl.c};color:#fff">${cl.l}</span>${x.cob !== Infinity && x.cob > 0 ? `<div style="font-size:11px;color:#888">${Math.round(x.cob / 30)} meses de stock</div>` : ""}</td></tr>`;
+      };
+      cont.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">${caja("activo", "Activo", CLASES.activo.d, CLASES.activo.c, r.activo)}${caja("lento", "Lento", CLASES.lento.d, CLASES.lento.c, r.lento)}${caja("frenado", "Frenado", CLASES.frenado.d, CLASES.frenado.c, r.frenado)}${caja("fuera", "Fuera del análisis", "los que sacaste a mano", "#888", r.fuera)}</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;font-size:13px">
+          <input id="frBusca" placeholder="Buscar artículo o código" value="${esc(frBusca)}" style="border:1px solid #ddd;border-radius:40px;padding:6px 12px;min-width:200px">
+          <select id="frCat" style="border:1px solid #ddd;border-radius:40px;padding:6px 10px"><option value="">Todas las categorías</option>${cats.map(c => `<option ${c === frCat ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>
+          <select id="frOrden" style="border:1px solid #ddd;border-radius:40px;padding:6px 10px"><option value="costo" ${frOrden === "costo" ? "selected" : ""}>Más plata parada</option><option value="unidades" ${frOrden === "unidades" ? "selected" : ""}>Más unidades</option><option value="ult" ${frOrden === "ult" ? "selected" : ""}>Última venta más vieja</option></select>
+          <label style="display:flex;gap:4px;align-items:center"><input type="checkbox" id="frVerFuera" ${frVerFuera ? "checked" : ""}> Ver los que saqué</label>
+          <span style="flex:1"></span>
+          <button data-frbulk="out" style="border:1px solid #9B5C6B;color:#9B5C6B;background:#fff;border-radius:40px;padding:5px 12px">Sacar estos ${vis.filter(x => !x.fuera).length} del análisis</button>
+          <button data-frbulk="in" style="border:1px solid #416096;color:#416096;background:#fff;border-radius:40px;padding:5px 12px">Volver a incluir estos</button></div>
+        <div style="font-size:12px;color:#666;margin-bottom:6px">${vis.length} artículos · ${plata(tot)} a costo · tildá o destildá para elegir qué entra al análisis</div>
+        <div style="overflow-x:auto;background:#fff;border:1px solid #eee;border-radius:12px"><table style="width:100%;border-collapse:collapse;font-size:13px">
+          <tr style="color:#666;font-size:11px;text-align:right"><th></th><th></th><th style="text-align:left;padding:6px">Artículo</th><th style="padding:6px">Stock</th><th style="padding:6px">Costo</th><th style="padding:6px">Venta 30d</th><th style="padding:6px">Última venta</th><th style="padding:6px">Estado</th></tr>
+          ${vis.slice(0, 400).map(fila).join("") || `<tr><td colspan="8" style="padding:14px;color:#888">Nada con este filtro</td></tr>`}</table></div>
+        ${vis.length > 400 ? `<div style="font-size:12px;color:#888;margin-top:6px">Se muestran los primeros 400. Usá los filtros para ver el resto.</div>` : ""}
+        <div style="font-size:11px;color:#999;margin-top:8px">Stock y costo: planilla de Ninox del ${stockActual.fecha ? stockActual.fecha.split("-").reverse().join("/") : "—"} · Venta: web (Tienda Nube) + local (cargas de Ninox)</div>`;
+      cont.querySelectorAll("[data-frf]").forEach(b => b.onclick = () => { frFiltro = frFiltro === b.dataset.frf ? "todos" : b.dataset.frf; render(); });
+      cont.querySelectorAll("[data-frx]").forEach(c => c.onchange = () => { db.ref("dashboard_stock_excluir/" + key(c.dataset.frx)).set(c.checked ? null : true); });
+      const bi = document.getElementById("frBusca"); bi.oninput = () => { frBusca = bi.value; clearTimeout(bi._t); bi._t = setTimeout(() => { render(); const n = document.getElementById("frBusca"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250); };
+      document.getElementById("frCat").onchange = e => { frCat = e.target.value; render(); };
+      document.getElementById("frOrden").onchange = e => { frOrden = e.target.value; render(); };
+      document.getElementById("frVerFuera").onchange = e => { frVerFuera = e.target.checked; render(); };
+      cont.querySelectorAll("[data-frbulk]").forEach(b => b.onclick = () => {
+        const sacar = b.dataset.frbulk === "out", lista = vis.filter(x => sacar ? !x.fuera : x.fuera);
+        if (!lista.length) return;
+        if (!confirm(`${sacar ? "¿Sacar" : "¿Volver a incluir"} ${lista.length} artículos ${sacar ? "del" : "en el"} análisis?`)) return;
+        const up = {}; lista.forEach(x => { up["dashboard_stock_excluir/" + key(x.k)] = sacar ? true : null; }); db.ref().update(up);
+      });
+    }
+    window.renderFrenado = render;
+    let t = null; const re = () => { clearTimeout(t); t = setTimeout(() => { try { render(); } catch (e) { console.error("frenado", e); } try { if (window.renderTablero) window.renderTablero(); } catch (e) {} }, 200); };
+    db.ref("dashboard_stock_excluir").on("value", s => { frExcl = s.val() || {}; re(); });
+    db.ref("dashboard").on("value", re); db.ref("dashboard_stock/actual").on("value", re); db.ref("dashboard_local_cargas").on("value", re);
   })();
 </script>
 <script>document.getElementById("tableroFecha").textContent=new Date().toLocaleDateString("es-AR",{weekday:"short",day:"2-digit",month:"2-digit"});</script>
