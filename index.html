@@ -4141,9 +4141,9 @@
         if (!it.costo_confirmado) cm.costo.push(f);
         let fuente = it;
         if (it.origen !== "proveedor") { const e = tbCosteos && tbCosteos[String(it.numero_corte || "").trim().replace(/[.#$\[\]\/]/g, "_")]; const a = e && (e.articulos || []).find(x => x && String(x.code || "") === String(it.code)); fuente = {}; ["precio_lista_local", "precio_tn_minorista", "precio_tn_mayorista"].forEach(c => { fuente[c] = (a && a[c] != null && a[c] !== "") ? a[c] : e && e[c]; }); }
-        if (["precio_lista_local", "precio_tn_minorista", "precio_tn_mayorista"].some(c => !fuente[c])) cm.precio.push(f);
+        if (!it.comerc_ok_precios && ["precio_lista_local", "precio_tn_minorista", "precio_tn_mayorista"].some(c => !fuente[c])) cm.precio.push(f);
         const cols = [...new Set(Object.values(it.grilla || {}).map(g => g && g.color).filter(Boolean))];
-        if (cols.length && cols.some(c => !(it.web_colores && it.web_colores[slug(c)]))) cm.web.push(f);
+        if (!it.comerc_ok_web && cols.length && cols.some(c => !(it.web_colores && it.web_colores[slug(c)]))) cm.web.push(f);
       });
       const div = Object.values(logiItems || {}).filter(it => it && it.estado === "pendiente_dividir" && !it.division_confirmada && !esMini(it));
       if (div.length) grupos.set("_div", { t: "Cargar división Avellaneda / depósito", n: div.length, dias: Math.max(0, ...div.map(it => Math.floor((Date.now() - (it.fecha_control_cerrado || it.fecha_creado || Date.now())) / 864e5))), atr: false, app: "fabrica" });
