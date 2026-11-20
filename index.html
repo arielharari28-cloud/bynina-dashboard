@@ -86,7 +86,8 @@
     <!-- ===================== TABLERO (nov 2026) ===================== -->
     <div class="view active" data-view="tablero">
       <div style="background:#3F2A2F;color:#fff;font-size:11px;letter-spacing:1px;padding:8px 14px;border-radius:12px;display:flex;justify-content:space-between;text-transform:uppercase"><span>Tablero · By Nina</span><span id="tableroFecha"></span></div>
-      <div id="tableroContenido" style="font-family:Inter,sans-serif;max-width:640px"><div style="padding:16px;color:#888;font-size:13px">Cargando…</div></div>
+      <style>#tableroContenido .tb-card{background:#fff;border:1px solid #eee;border-radius:16px;padding:4px 18px 16px}#tableroContenido .tb-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,440px),1fr));gap:16px;align-items:start}@media (min-width:900px){#tableroContenido{zoom:1.18}}</style>
+      <div id="tableroContenido" style="font-family:Inter,sans-serif"><div style="padding:16px;color:#888;font-size:13px">Cargando…</div></div>
     </div>
 
     <div class="view" data-view="dashboard">
@@ -4167,7 +4168,7 @@
       const rapidos = (data.productos || []).filter(p => p && p.id != null).map(p => {
         const v7 = clVend(p, "7dias"), v30 = clVend(p, "30dias");
         return { p, v7, v30, ritmo: v30 > 0 ? (v7 / 7) / (v30 / 30) : (v7 > 0 ? 9 : 0) };
-      }).filter(x => x.v7 >= 5 && x.ritmo >= 1.5).sort((a, b) => b.ritmo - a.ritmo || b.v7 - a.v7).slice(0, 6);
+      }).filter(x => { if (x.v7 < 5 || x.ritmo < 1.5) return false; const st = focoStock(x.p); return st <= 0 || st / (x.v7 / 7) < 60; }).sort((a, b) => b.ritmo - a.ritmo || b.v7 - a.v7).slice(0, 6);
       const reponer = ps.filter(p => flEstado(p) === "rep").map(p => {
         const st = focoStock(p), v = vd(p);
         return { p, st, dias: v > 0 ? st / v : null, sug: Math.max(0, Math.round(v * REPONER_DIAS_CUBRIR - st)) };
@@ -4184,7 +4185,8 @@
       const cont = document.getElementById("tableroContenido");
       if (!cont || !data) return;
       const r = rango(tbPer);
-      let h = "";
+      let h = ""; const cards = [];
+      const brk = () => { if (h) cards.push(`<div class="tb-card">${h}</div>`); h = ""; };
       // Depende de vos
       const pend = pendientesAriel();
       h += tit(`Depende de vos · ${pend.reduce((s, g) => s + g.n, 0)}`);
@@ -4194,8 +4196,9 @@
           <span style="font-size:13px">${esc(g.t)} <span style="color:#888">· ${g.n}</span>${g.monto ? ` <span style="color:${T.rosa};font-weight:600">${plata(g.monto)}</span>` : ""}</span>
           <span style="background:${pill};color:#fff;border-radius:40px;padding:2px 10px;font-size:11px;white-space:nowrap">${cuando}</span></a>`;
       }).join("") : `<div style="padding:12px;font-size:13px;color:#666">No tenés nada pendiente. ${tbPend === null ? "(cargando…)" : ""}</div>`) + `</div>`;
+      brk();
       // Períodos
-      h += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:20px 0 0">${PERS.map(([k, l]) => `<button data-tbper="${k}" style="padding:6px 14px;border-radius:40px;font-size:12px;border:1px solid ${T.azul};${tbPer === k ? `background:${T.azul};color:#fff` : `background:#fff;color:${T.azul}`}">${l}</button>`).join("")}</div>`;
+      const pills = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin:14px 0">${PERS.map(([k, l]) => `<button data-tbper="${k}" style="padding:6px 14px;border-radius:40px;font-size:12px;border:1px solid ${T.azul};${tbPer === k ? `background:${T.azul};color:#fff` : `background:#fff;color:${T.azul}`}">${l}</button>`).join("")}</div>`;
       // Venta
       const esDia = tbPer === "dia";
       const w = ventaWeb(r.desde, r.hasta), wa = ventaWeb(r.antDesde, r.antHasta);
@@ -4207,10 +4210,12 @@
       const max = Math.max(w.u, l.u, 1), barra = (n, x, sub, col) => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin:6px 0"><span style="width:44px;color:#666">${n}</span><span style="flex:1;background:#eee;border-radius:40px;height:8px;overflow:hidden"><span style="display:block;height:8px;width:${Math.round(x / max * 100)}%;background:${col}"></span></span><span style="min-width:110px;text-align:right">${sub}</span></div>`;
       h += `<div style="margin-top:8px">${barra("Local", l.u, esDia ? "se carga por semana" : l.hay ? `${num(l.u)} · ${plata(l.f)}` : "falta cargar", T.azul)}${barra("Web", w.u, `${num(w.u)} · ${plata(w.f)}`, T.celeste)}<div style="display:flex;gap:8px;font-size:12px;color:#aaa;margin:6px 0"><span style="width:44px">ML</span><span style="flex:1;border-top:1px dashed #ccc;margin-top:8px"></span><span style="min-width:110px;text-align:right">próximamente</span></div></div>`;
       h += `<div style="font-size:11px;color:#888">Local por semana de carga${ult ? ` · última: ${fc(ult.desde)} al ${fc(ult.hasta)}` : " · todavía no hay cargas"}${!esDia && ult && ult.hasta < addD(r.hasta, -7) ? ` · <span style="color:${T.rosa}">falta cargar la última semana</span>` : ""}${esDia ? " · en Día solo se ve la web" : ""}</div>`;
+      brk();
       // Producción
       const p = produccion(r.desde, r.hasta), pa = produccion(r.antDesde, r.antHasta);
       h += tit("Producción · " + esc(r.nom), `<a href="${URL_FABRICA}" target="_blank" rel="noopener" style="text-decoration:none">${ver("Fábrica")}</a>`);
       h += `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${caja("Cortadas", num(p.cort), delta(p.cort, pa.cort))}${caja("Ingresaron", num(p.ing), `<span style="color:${T.rosa}">${num(p.enTaller)} en talleres ahora</span>`)}</div>`;
+      brk();
       // Plata
       const vi = valorIngresos(p.ingItems);
       h += tit("Plata · " + esc(r.nom));
@@ -4220,6 +4225,7 @@
         ${fila("Vendido", `<b style="color:${T.rosa}">${plata(fT)}</b>`)}
         ${fila("Vendido / lo que entró", vi.venta ? `<b>${(fT / vi.venta).toLocaleString("es-AR", { maximumFractionDigits: 1 })} x</b>` : "—")}</div>`;
       if (vi.sinPrecio) h += `<div style="font-size:11px;color:#888;margin-top:4px">${vi.sinPrecio} ingreso${vi.sinPrecio > 1 ? "s" : ""} sin precio en Ninox ni en Costeo (no suman).</div>`;
+      brk();
       // Stock y alertas
       const a = alertas();
       const stU = stockActual ? (stockActual.n || 0) + (stockActual.a || 0) : 0;
@@ -4228,13 +4234,16 @@
       h += `<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${caja("Unidades", stockActual ? num(stU) : "—", stockActual ? `${ritmoMes ? "≈ " + (stU / ritmoMes).toLocaleString("es-AR", { maximumFractionDigits: 1 }) + " meses de venta · " : ""}a costo ${plata(stockActual.costo)}` : "Subí la planilla de stock")}${caja("Planilla Ninox", stockActual ? stockActual.fecha.split("-").reverse().slice(0, 2).join("/") : "—", stockActual ? `Nina ${num(stockActual.n)} · Avellaneda ${num(stockActual.a)}` : "")}</div>`;
       if (a) {
         h += `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${["rep", "sin", "cur", "emp", "clav"].map(k => { const e = FL_ESTADOS[k], n = a.cuenta[k] || 0; return `<button data-tbfoco="${k}" style="padding:5px 12px;border-radius:40px;font-size:12px;border:1px solid ${e.c};color:${e.c};background:#fff">${e.l} · ${n}</button>`; }).join("")}</div>`;
-        h += tit("Saliendo rápido", `<span style="font-size:11px;color:#888">últimos 7 días vs 30 · web</span>`);
+        brk();
+        h += tit("Saliendo rápido", `<span style="font-size:11px;color:#888">7 días vs 30 · web · los que se quedan sin stock antes de 60 días</span>`);
         h += a.rapidos.length ? `<div style="border:1px solid #eee;border-radius:12px;overflow:hidden">${a.rapidos.map(x => { const st = focoStock(x.p), vdia = x.v7 / 7; return fila(`${esc(x.p.producto)} <span style="color:#888">· ${x.v7} en 7 días</span>`, `<span style="color:#166534;font-weight:600">x${x.ritmo.toLocaleString("es-AR", { maximumFractionDigits: 1 })}</span> · ${st > 0 ? `stock ${num(st)} · ${Math.round(st / vdia)} días` : `<span style="color:#b91c1c">sin stock</span>`}`); }).join("")}</div>` : `<div style="font-size:13px;color:#666">Nada acelerando fuerte esta semana.</div>`;
+        brk();
         h += tit("Reponer primero", `<span style="font-size:11px;color:#888">sugerido para cubrir ${REPONER_DIAS_CUBRIR} días</span>`);
         h += a.reponer.length ? `<div style="border:1px solid #eee;border-radius:12px;overflow:hidden">${a.reponer.map(x => fila(`${esc(x.p.producto)}${flCorte(x.p) ? ` <span style="color:${T.azul}">· ${esc(flCorte(x.p))}</span>` : ""}`, `${x.dias != null ? Math.round(x.dias) + " días" : "—"} · <b style="color:${T.rosa}">≈ ${num(x.sug)} u.</b>`)).join("")}</div>` : `<div style="font-size:13px;color:#666">No hay artículos para reponer.</div>`;
       }
       h += `<div style="font-size:11px;color:#aaa;margin:16px 0 4px">Web: Tienda Nube · Local y stock: cargas de Ninox · Producción: app de fábrica · Pagos: egresos</div>`;
-      cont.innerHTML = h;
+      brk();
+      cont.innerHTML = pills + `<div class="tb-grid">${cards.join("")}</div>`;
       cont.querySelectorAll("[data-tbper]").forEach(b => b.onclick = () => { tbPer = b.dataset.tbper; render(); });
       cont.querySelectorAll("[data-tbfoco]").forEach(b => b.onclick = () => { try { flFiltro = b.dataset.tbfoco; focoVista = "lista"; } catch (e) {} irAVista("foco"); try { renderFoco(); } catch (e) {} });
     }
