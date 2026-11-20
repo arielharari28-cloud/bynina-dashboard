@@ -4125,6 +4125,22 @@
       });
       const pr = Object.values(logiItems || {}).filter(it => it && it.precio_solicitud);
       if (pr.length) grupos.set("_precio", { t: "Aprobar precio de taller", n: pr.length, dias: Math.max(...pr.map(it => Math.floor((Date.now() - (it.precio_solicitud.ts || Date.now())) / 86400000))), atr: false, app: "fabrica" });
+      // Comercializar: cortes divididos en los últimos 60 días a los que les falta costo, precios o subir a la web.
+      const desde60 = Date.now() - 60 * 864e5, cm = { costo: [], precio: [], web: [] };
+      const slug = c => String(c || "").trim().toLowerCase().replace(/[.#$\[\]\/]/g, "_").replace(/\s+/g, "_");
+      Object.values(logiItems || {}).forEach(it => {
+        if (!it || it.estado !== "cerrado" || it.sigue_a_estampado || esMini(it) || !((it.fecha_cerrado || 0) >= desde60)) return;
+        const f = it.fecha_cerrado;
+        if (!it.costo_confirmado) cm.costo.push(f);
+        let fuente = it;
+        if (it.origen !== "proveedor") { const e = tbCosteos && tbCosteos[String(it.numero_corte || "").trim().replace(/[.#$\[\]\/]/g, "_")]; const a = e && (e.articulos || []).find(x => x && String(x.code || "") === String(it.code)); fuente = {}; ["precio_lista_local", "precio_tn_minorista", "precio_tn_mayorista"].forEach(c => { fuente[c] = (a && a[c] != null && a[c] !== "") ? a[c] : e && e[c]; }); }
+        if (["precio_lista_local", "precio_tn_minorista", "precio_tn_mayorista"].some(c => !fuente[c])) cm.precio.push(f);
+        const cols = [...new Set(Object.values(it.grilla || {}).map(g => g && g.color).filter(Boolean))];
+        if (cols.length && cols.some(c => !(it.web_colores && it.web_colores[slug(c)]))) cm.web.push(f);
+      });
+      [["costo", "Comercializar: confirmar costo"], ["precio", "Comercializar: cargar precios"], ["web", "Comercializar: subir a la web"]].forEach(([k, t]) => {
+        if (cm[k].length) grupos.set("_cm" + k, { t, n: cm[k].length, dias: Math.floor((Date.now() - Math.min(...cm[k])) / 864e5), atr: false, app: "fabrica" });
+      });
       const e = egresosHoy();
       if (e.venc.n) grupos.set("_venc", { t: "Pagos vencidos", n: e.venc.n, monto: e.venc.m, dias: e.venc.dias, atr: true, app: "egresos" });
       if (e.hoy.n) grupos.set("_hoy", { t: "Pagos de hoy", n: e.hoy.n, monto: e.hoy.m, dias: 0, atr: false, app: "egresos" });
