@@ -1542,16 +1542,20 @@
       const temp = lcNorm(nombre).includes("verano") ? "Verano" : lcNorm(nombre).includes("invierno") ? "Invierno" : "";
       if (!suc) return;
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header: 1, defval: null });
-      const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad"));
+      const h = rows.findIndex(r => r && r.some(c => lcNorm(c) === "codigo") && r.some(c => lcNorm(c) === "cantidad" || lcNorm(c) === "disponible"));
       if (h < 0) return;
-      const col = t => rows[h].findIndex(c => lcNorm(c) === t), iK = col("codigo"), iD = col("descripcion"), iQ = col("cantidad"), iC = col("costo cantidad"), iPC = col("p costo"), iPV = col("p venta");
+      // Sirve el formato por artículo (Cantidad) y el reporte crudo de Ninox por color y talle (Disponible, sin lo reservado).
+      const col = t => rows[h].findIndex(c => lcNorm(c) === t), iK = col("codigo"), iD = col("descripcion"), iC = col("costo cantidad"), iPC = col("p costo"), iPV = col("p venta");
+      const iQ = col("cantidad") >= 0 ? col("cantidad") : col("disponible"), iCol = col("color"), iTal = col("talle");
       if (suc === "a") hojasA++; else hojasN++;
       rows.slice(h + 1).forEach(r => {
         if (!r || r[iK] == null || String(r[iK]).trim() === "") return;
         const d = iD >= 0 && r[iD] != null ? String(r[iD]).trim() : "";
         if (/^(devoluciones|etiquetado|venta|articulo con fallas?)$/i.test(d)) return;
-        const k = String(r[iK]).trim(), e = m.get(k) || { k, d, n: 0, a: 0, co: 0, pc: 0, pv: 0 };
-        e[suc] += parseNumAR(r[iQ]); if (temp && !e.t) e.t = temp;
+        const k = String(r[iK]).trim().replace(/\.0$/, ""), e = m.get(k) || { k, d, n: 0, a: 0, co: 0, pc: 0, pv: 0 };
+        const q = parseNumAR(r[iQ]); e[suc] += q; if (temp && !e.t) e.t = temp;
+        if (iCol >= 0 && iTal >= 0 && q) { const co = String(r[iCol] == null ? "" : r[iCol]).trim() || "Único", ta = String(r[iTal] == null ? "" : r[iTal]).trim() || "Único";
+          e.vm = e.vm || new Map(); const kk = lcNorm(co) + "|" + lcNorm(ta), x = e.vm.get(kk) || [co, ta, 0, 0]; x[suc === "n" ? 2 : 3] += q; e.vm.set(kk, x); }
         if (iC >= 0) e.co += parseNumAR(r[iC]);
         if (iPC >= 0 && parseNumAR(r[iPC])) e.pc = parseNumAR(r[iPC]);
         if (iPV >= 0 && parseNumAR(r[iPV])) e.pv = parseNumAR(r[iPV]);
@@ -1559,14 +1563,23 @@
       });
     });
     if (!hojasN || !hojasA) throw new Error('El archivo tiene que traer hojas de "Nina" y de "Avellaneda", con las columnas Codigo y Cantidad.');
-    const items = [...m.values()].map(e => ({ ...e, co: Math.round(e.co) })), sum = c => items.reduce((x, i) => x + (i[c] || 0), 0);
-    return { items, n: sum("n"), a: sum("a"), costo: sum("co") };
+    // El reporte crudo no trae precios: se toman de la última carga, por código.
+    const prev = new Map(((stockActual && stockActual.items) || []).filter(Boolean).map(i => [stNorm(i.k), i])), conCosto = [...m.values()].some(e => e.co);
+    const sinPrecio = [];
+    const items = [...m.values()].map(e => {
+      const pr = prev.get(stNorm(e.k)); if (!e.pc && pr && pr.pc) e.pc = pr.pc; if (!e.pv && pr && pr.pv) e.pv = pr.pv;
+      if (!conCosto) e.co = (e.pc || 0) * ((e.n || 0) + (e.a || 0));
+      if (!e.pc && (e.n || 0) + (e.a || 0) > 0) sinPrecio.push(e.d || e.k);
+      const { vm, ...rest } = e, v = vm ? [...vm.values()].filter(x => x[2] || x[3]) : null;
+      return { ...rest, co: Math.round(e.co), ...(v && v.length ? { v } : {}) };
+    }), sum = c => items.reduce((x, i) => x + (i[c] || 0), 0);
+    return { items, n: sum("n"), a: sum("a"), costo: sum("co"), detalle: items.reduce((x, i) => x + (i.v ? i.v.length : 0), 0), sinPrecio };
   }
   async function lcSubirStock(file) {
     const r = await lcLeerStock(file), fecha = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
-    const tot = { fecha, n: r.n, a: r.a, costo: r.costo, articulos: r.items.length };
+    const tot = { fecha, n: r.n, a: r.a, costo: r.costo, articulos: r.items.length, detalle: r.detalle };
     await db.ref().update({ "dashboard_stock/actual": { ...tot, archivo: file.name, cargado: new Date().toISOString(), items: r.items }, ["dashboard_stock/historial/" + fecha]: tot });
-    return tot;
+    return { ...tot, sinPrecio: r.sinPrecio };
   }
   function lcPanelHtml(pre) {
     const hoy = new Date(), iso = d => d.toISOString().slice(0, 10);
@@ -1584,7 +1597,7 @@
         <button class="pill active" id="${pre}Guardar">Guardar</button><span id="${pre}Msg" class="text-xs"></span></div>
       <div class="pt-2 border-t border-slate-100 space-y-1"><div class="text-xs font-semibold text-slate-500">Stock de la semana</div>
         <div class="flex flex-wrap gap-2 items-center"><input type="file" id="${pre}StFile" accept=".xlsx,.xls" class="text-xs"><button class="pill active" id="${pre}StGuardar">Guardar stock</button><span id="${pre}StMsg" class="text-xs"></span></div>
-        <div class="text-xs text-slate-500">${stockActual ? `Último: ${stockActual.fecha.split("-").reverse().join("/")} · Nina ${fmtNum(stockActual.n)} u. · Avellaneda ${fmtNum(stockActual.a)} u. · ${fmtMoney(stockActual.costo)} a costo · ${fmtNum(stockActual.articulos)} artículos` : "Todavía no se cargó ninguno."}</div></div>
+        <div class="text-xs text-slate-500">${stockActual ? `Último: ${stockActual.fecha.split("-").reverse().join("/")} · Nina ${fmtNum(stockActual.n)} u. · Avellaneda ${fmtNum(stockActual.a)} u. · ${fmtMoney(stockActual.costo)} a costo · ${fmtNum(stockActual.articulos)} artículos${stockActual.detalle ? " · por color y talle" : ""}` : "Todavía no se cargó ninguno."}</div></div>
       ${cargas.length ? `<div class="pt-2 border-t border-slate-100"><div class="text-xs font-semibold text-slate-500 mb-1">Cargas del local</div>
         <div class="space-y-1">${cargas.slice(0, 12).map(c => { const u = (c.items || []).reduce((s, i) => s + (i.u || 0), 0), f = (c.items || []).reduce((s, i) => s + (i.f || 0), 0);
           return `<div class="flex flex-wrap gap-2 items-center text-xs"><span class="w-28">${lcRangoTxt(c)}</span><span class="text-slate-500">${fmtNum(u)} u.${f ? " · " + fmtMoney(f) : ""}${(c.tipos || []).includes("ganancia") ? " · con costo" : ""}${(c.tipos || []).includes("ranking") ? " · con color" : ""}</span><button class="text-red-600 underline" data-lcdel="${focoEsc(c.id)}">borrar</button></div>`; }).join("")}</div></div>` : ""}
@@ -1598,7 +1611,7 @@
       const f = (q("StFile").files || [])[0], m = q("StMsg");
       if (!f) { m.textContent = "Elegí el archivo primero."; m.style.color = "#b91c1c"; return; }
       m.textContent = "Leyendo…"; m.style.color = "#64748b"; q("StGuardar").disabled = true;
-      try { const t = await lcSubirStock(f); const m2 = q("StMsg"); if (m2) { m2.style.color = "#15803d"; m2.textContent = `✓ Guardado: Nina ${fmtNum(t.n)} u. · Avellaneda ${fmtNum(t.a)} u.`; } }
+      try { const t = await lcSubirStock(f); const m2 = q("StMsg"); if (m2) { m2.style.color = "#15803d"; m2.innerHTML = `✓ Guardado: Nina ${fmtNum(t.n)} u. · Avellaneda ${fmtNum(t.a)} u. · ${fmtNum(t.articulos)} artículos${t.detalle ? " · " + fmtNum(t.detalle) + " color/talle" : ""}${t.sinPrecio.length ? `<div style="color:#b45309;margin-top:2px">${t.sinPrecio.length} sin precio de costo (no suman al costo): ${t.sinPrecio.slice(0, 20).map(focoEsc).join(", ")}${t.sinPrecio.length > 20 ? "…" : ""}</div>` : ""}`; } }
       catch (e) { const m2 = q("StMsg"); if (m2) { m2.style.color = "#b91c1c"; m2.textContent = "No se pudo cargar: " + e.message; } }
       if (q("StGuardar")) q("StGuardar").disabled = false;
     };
@@ -2281,6 +2294,26 @@
   function focoGuardar() { db.ref("dashboard_foco").update({ categorias: focoCats, periodo: focoPeriodo }); }
   const focoEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const FOCO_MODOS = [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["tn", "Tienda Nube (anterior)"]];
+  // Transferencias sugeridas: en los que venden 30+ por mes en la web, los color/talle en 0 en la web con 3 o más en Avellaneda.
+  const ST_TRANSF_VENTA = 30, ST_TRANSF_MIN = 3;
+  const stTieneDetalle = () => !!(stockActual && (stockActual.items || []).some(i => i && i.v));
+  function stTransferencias() {
+    const filas = [];
+    (data.productos || []).forEach(p => { const it = stItem(p), w = clVend(p, "30dias"); if (!it || !it.v || w < ST_TRANSF_VENTA) return;
+      it.v.forEach(([co, ta, , av]) => { if ((av || 0) < ST_TRANSF_MIN) return;
+        const v = (p.variantes || []).find(x => lcNorm(x.color || "Único") === lcNorm(co) && lcNorm(x.talle || "Único") === lcNorm(ta)), st = v ? v.stock || 0 : 0;
+        if (st <= 0) filas.push({ k: it.k, d: p.producto, w, co, ta, av, st }); }); });
+    return filas.sort((a, b) => b.w - a.w || String(a.co).localeCompare(b.co));
+  }
+  function stDescargarTransf(btn) {
+    const f = stTransferencias();
+    if (!f.length) { btn.textContent = "Sin transferencias para sugerir"; return; }
+    const ws = XLSX.utils.aoa_to_sheet([["Código", "Artículo", "Venta web 30 d", "Color", "Talle", "En Avellaneda", "En web"], ...f.map(x => [x.k, x.d, x.w, x.co, x.ta, x.av, x.st])]);
+    ws["!cols"] = [10, 32, 14, 22, 8, 14, 8].map(w => ({ wch: w }));
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Transferir a depósito");
+    XLSX.writeFile(wb, `Transferencias sugeridas ${new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10)}.xlsx`);
+    btn.textContent = `⇄ ${fmtNum(f.reduce((s, x) => s + x.av, 0))} prendas · ${new Set(f.map(x => x.k)).size} artículos`;
+  }
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
     localRecalc();
@@ -2294,7 +2327,8 @@
     document.getElementById("focoModoBar").innerHTML = `<span class="w-full flex flex-wrap gap-1.5 items-center mb-1"><span class="text-xs text-slate-500 font-medium">Vista:</span>${[["lista", "☰ Lista"], ["tarjetas", "▦ Tarjetas"]].map(([k, l]) => `<button class="pill ${focoVista === k ? "active" : ""}" data-fvista="${k}">${l}</button>`).join("")}</span><span class="text-xs text-slate-500 font-medium">Ver por:</span>${modos.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
       + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "")
       + (focoModo !== "tn" && focoModo !== "ingreso" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${ordenes.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "")
-      + (focoModo !== "tn" ? `<span class="w-full flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de:</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>${localBarra()}` : "");
+      + (focoModo !== "tn" ? `<span class="w-full flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de:</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>${localBarra()}${stTieneDetalle() ? `<button class="pill" id="focoTransf" title="Color y talle en 0 en la web con ${ST_TRANSF_MIN} o más en Avellaneda, en los que venden ${ST_TRANSF_VENTA}+ por mes en la web">⇄ Transferencias sugeridas</button>` : ""}` : "");
+    const tb = document.getElementById("focoTransf"); if (tb) tb.onclick = () => stDescargarTransf(tb);
     document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
     document.querySelectorAll("[data-fvista]").forEach(b => b.onclick = () => { focoVista = b.dataset.fvista; db.ref("dashboard_foco/vista").set(focoVista); renderFoco(); });
     document.querySelectorAll("[data-forden]").forEach(b => b.onclick = () => { focoOrden = b.dataset.forden; db.ref("dashboard_foco/orden").set(focoOrden); renderFoco(); });
@@ -2515,14 +2549,29 @@
     const loc = localData ? Math.round(localVend(p)) : null;
     // Grilla color × talle: stock y vendidas del período
     const vars = p.variantes || [];
+    // Avellaneda por color y talle, de la planilla de Ninox (si la última carga trae el detalle).
+    const stI = stItem(p), avD = stI && stI.v ? new Map(stI.v.map(x => [lcNorm(x[0]) + "|" + lcNorm(x[1]), x])) : null;
     const colores = [...new Set(vars.map(v => v.color || "Único"))], talles = [...new Set(vars.map(v => v.talle || "Único"))];
+    if (avD) avD.forEach(x => { if (!colores.some(c => lcNorm(c) === lcNorm(x[0]))) colores.push(x[0]); if (!talles.some(t => lcNorm(t) === lcNorm(x[1]))) talles.push(x[1]); });
+    const avDe = (col, t) => { const x = avD && avD.get(lcNorm(col) + "|" + lcNorm(t)); return x ? x[3] || 0 : 0; };
+    let pasar = 0; const agot = [];
     const vend = new Map((vp.variantesVendidas || []).map(v => [(v.color || "Único") + "|" + (v.talle || "Único"), v.unidades || 0]));
-    const celda = (col, t) => { const v = vars.find(x => (x.color || "Único") === col && (x.talle || "Único") === t); if (!v) return `<td class="px-2 py-1.5 text-center text-slate-300">—</td>`;
+    const celda = (col, t) => { const v = vars.find(x => (x.color || "Único") === col && (x.talle || "Único") === t);
+      if (avD) { const st = v ? v.stock || 0 : 0, av = avDe(col, t), vv = vend.get(col + "|" + t) || 0;
+        if (!v && !av) return `<td class="px-2 py-1.5 text-center text-slate-300">—</td>`;
+        if (st <= 0 && av > 0) pasar += av;
+        const cls = st <= 0 && av > 0 ? "bg-blue-50 text-blue-700" : st <= 0 ? "bg-red-50 text-red-600" : st <= 3 && vv > 0 ? "bg-amber-50" : "";
+        return `<td class="px-2 py-1.5 text-center whitespace-nowrap ${cls}"><b>${st}</b><span class="text-[11px]"> · ${av}</span>${vv ? `<span class="text-slate-400 text-[11px]"> · ${vv}v</span>` : ""}</td>`; }
+      if (!v) return `<td class="px-2 py-1.5 text-center text-slate-300">—</td>`;
       const st = v.stock || 0, vv = vend.get(col + "|" + t) || 0;
       return `<td class="px-2 py-1.5 text-center ${st <= 0 ? "bg-red-50" : st <= 3 && vv > 0 ? "bg-amber-50" : ""}"><b class="${st <= 0 ? "text-red-600" : ""}">${st}</b>${vv ? `<span class="text-slate-400 text-[11px]"> · ${vv}v</span>` : ""}</td>`; };
     const grilla = `<table class="w-full text-xs border border-slate-200 rounded-lg overflow-hidden"><thead class="bg-slate-50 text-slate-500"><tr><th class="px-2 py-1.5 text-left">Color</th>${talles.map(t => `<th class="px-2 py-1.5 text-center">${focoEsc(t)}</th>`).join("")}<th class="px-2 py-1.5 text-right">Total</th></tr></thead>
-      <tbody>${colores.map(col => { const tot = vars.filter(v => (v.color || "Único") === col).reduce((s, v) => s + (v.stock || 0), 0);
-        return `<tr class="border-t border-slate-100"><td class="px-2 py-1.5 font-medium">${focoEsc(col)}</td>${talles.map(t => celda(col, t)).join("")}<td class="px-2 py-1.5 text-right font-bold">${tot}</td></tr>`; }).join("")}</tbody></table>`;
+      <tbody>${colores.map(col => { const tot = vars.filter(v => (v.color || "Único") === col).reduce((s, v) => s + (v.stock || 0), 0), totA = avD ? talles.reduce((s, t) => s + avDe(col, t), 0) : 0;
+        if (avD && !tot && !totA) agot.push(col);
+        return `<tr class="border-t border-slate-100"><td class="px-2 py-1.5 font-medium">${focoEsc(col)}</td>${talles.map(t => celda(col, t)).join("")}<td class="px-2 py-1.5 text-right font-bold whitespace-nowrap">${tot}${avD ? `<span class="font-normal text-[11px]"> · ${totA}</span>` : ""}</td></tr>`; }).join("")}</tbody></table>`
+      + (avD ? `<div class="text-[11px] text-slate-500 mt-1">Web (Nina) · Avellaneda, planilla del ${stockActual.fecha.split("-").reverse().slice(0, 2).join("/")}.</div>
+        ${agot.length ? `<div class="text-xs mt-1.5"><span class="chip" style="background:#FCEBEB;color:#A32D2D">Agotado en los dos</span> ${agot.map(focoEsc).join(", ")}: hay que cortar</div>` : ""}
+        ${pasar ? `<div class="text-xs mt-1"><span class="chip" style="background:#E6F1FB;color:#0C447C">Pasar del local</span> ${fmtNum(pasar)} prendas que están en 0 en la web</div>` : ""}` : "");
     const precio = Math.max(0, ...vars.map(v => v.precio || 0)), promos = vars.map(v => Number(v.promo) || 0).filter(x => x > 0), promo = promos.length ? Math.max(...promos) : 0;
     const chip = (on, attrs, txt) => `<button class="pill ${on ? "active" : ""}" ${attrs}>${focoEsc(txt)}</button>`;
     const pend = !clasificado || pmDraft.base !== (c.base || "") || pmDraft.grupo !== clGrupo(p, c.grupo || "") || [...pmDraft.tendencias].sort().join("|") !== clTendDe(p).filter(t => !clEsGrupo(t)).sort().join("|");
@@ -2544,7 +2593,7 @@
             ${dato("Precio", promo && promo < precio ? `<s class="text-slate-400 text-sm font-normal">${fmtMoney(precio)}</s> ${fmtMoney(promo)}` : fmtMoney(precio))}
           </div>
           <div class="text-xs text-slate-500">Último ingreso: ${ing ? `<b>${flFecha(ing.fecha)}</b> · ${ing.origen === "fabrica" ? "Fábrica" : ing.origen === "proveedor" ? "Proveedor" : "Alta en TN"}${ing.u ? " · " + fmtNum(ing.u) + " u." : ""}` : "—"} · Vendidas local y días de stock según el período de Foco (${focoPerDias()} días).</div>
-          <div><div class="text-xs font-semibold text-slate-500 mb-1">Stock por color y talle <span class="font-normal text-slate-400">· "v" = vendidas ${perL}</span></div>${grilla}</div>
+          <div><div class="text-xs font-semibold text-slate-500 mb-1">Stock por color y talle <span class="font-normal text-slate-400">· ${avD ? "web · Avellaneda · " : ""}"v" = vendidas web ${perL}</span></div>${grilla}</div>
           <div class="border-t border-slate-100 pt-3">
             <div class="flex items-baseline justify-between mb-2"><div class="font-bold text-sm">Clasificación</div>
               ${clasificado ? `<span class="chip" style="background:#EAF3DE;color:#27500A">Clasificado</span>` : c.rechazado ? `<span class="chip chip-low">Rechazado</span>` : `<span class="chip chip-amber">Sin clasificar</span>`}</div>
