@@ -46,12 +46,7 @@
   </div>
   <nav class="flex-1 py-4 px-2 space-y-0.5" id="sidebarNav">
     <div class="navitem active" data-view="tablero">🧭 Tablero</div>
-    <div class="navitem" data-view="dashboard">📊 Cómo vamos</div>
     <div class="navitem" data-view="foco">🔎 Foco</div>
-    <div class="navitem" data-view="frenado">🧊 Stock frenado</div>
-    <div class="navitem" data-view="stock">📦 Catálogo</div>
-    <div class="navitem" data-view="vendidos">🏆 Vendidos</div>
-    <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
     <div class="navitem" data-view="marketing">📣 Pauta y clientas</div>
@@ -65,12 +60,7 @@
 <main class="flex-1 min-w-0 p-4 md:p-6 max-w-[1100px] mx-auto">
   <nav id="mobileNav" aria-label="Secciones">
     <div class="navitem active" data-view="tablero">🧭 Tablero</div>
-    <div class="navitem" data-view="dashboard">📊 Cómo vamos</div>
     <div class="navitem" data-view="foco">🔎 Foco</div>
-    <div class="navitem" data-view="frenado">🧊 Stock frenado</div>
-    <div class="navitem" data-view="stock">📦 Catálogo</div>
-    <div class="navitem" data-view="vendidos">🏆 Vendidos</div>
-    <div class="navitem" data-view="ganadores">🏅 Ganadores</div>
     <div class="navitem" data-view="objetivos">🎯 Objetivos</div>
     <div class="navitem" data-view="cyber">🔥 Cyber</div>
     <div class="navitem" data-view="marketing">📣 Pauta y clientas</div>
@@ -114,15 +104,15 @@
 
       <div class="hidden">
         <div class="card p-5">
-          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">🏆 Más vendidos</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="vendidos">Ver más →</div></div>
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">🏆 Más vendidos</div></div>
           <div id="miniMasVendidos" class="space-y-2 text-sm"></div>
         </div>
         <div class="card p-5">
-          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">⚠️ Últimas unidades</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="ultimas">Ver más →</div></div>
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">⚠️ Últimas unidades</div></div>
           <div id="miniUltimas" class="space-y-2 text-sm"></div>
         </div>
         <div class="card p-5">
-          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">📭 Sin ventas</div><div class="text-xs text-indigo-600 font-semibold cursor-pointer" data-goto="sinventas">Ver más →</div></div>
+          <div class="flex items-center justify-between mb-3"><div class="font-bold text-sm">📭 Sin ventas</div></div>
           <div id="miniSinVentas" class="space-y-2 text-sm"></div>
         </div>
       </div>
@@ -174,160 +164,14 @@
       </div>
     </div>
 
-    <div class="view" data-view="stock">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📦 Catálogo</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4" id="stockCount"></p>
-
-      <input type="search" id="stockBuscar" placeholder="Buscar por nombre o SKU..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-
-      <div class="flex flex-wrap gap-2 items-center mb-3">
-        <span class="text-xs text-slate-500 font-medium">Ordenar:</span>
-        <div class="flex flex-wrap gap-1.5" id="stockOrden">
-          <button class="pill active" data-crit="nombre">Nombre (A-Z)</button>
-          <button class="pill" data-crit="mayorStock">Mayor stock</button>
-          <button class="pill" data-crit="menorStock">Menor stock</button>
-          <button class="pill" data-crit="mayorValor">Mayor valor</button>
-          <button class="pill" data-crit="masVendidos">Más vendidos</button>
-          <button class="pill" data-crit="masRecientes">Más recientes</button>
-          <button class="pill" data-crit="masAntiguos">Más antiguos</button>
-        </div>
-      </div>
-
-      <div class="flex flex-wrap gap-2 items-center mb-3">
-        <span class="text-xs text-slate-500 font-medium">Stock:</span>
-        <input type="number" min="0" id="stockMin" placeholder="Mín" class="w-20 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
-        <span class="text-xs text-slate-400">—</span>
-        <input type="number" min="0" id="stockMax" placeholder="Máx" class="w-20 border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
-        <select id="stockCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm ml-2"><option value="">Todas las categorías</option></select>
-      </div>
-
-      <div class="flex flex-wrap gap-2 items-center mb-5">
-        <label class="flex items-center gap-1.5 text-xs text-slate-500 cursor-pointer select-none">
-          <input type="checkbox" id="stockOcultos" class="rounded border-slate-300 text-indigo-600" />Ver ocultos
-        </label>
-      </div>
-
-      <div id="stockLista" class="space-y-3"></div>
-    </div>
 
     <!-- ===================== ÚLTIMAS UNIDADES ===================== -->
-    <div class="view" data-view="ultimas">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">⚠️ Últimas unidades</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4">Ordenados por días hasta agotarse según el ritmo de ventas del período elegido.</p>
-
-      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoUltimas"></div>
-
-      <div class="flex flex-wrap gap-2 items-center mb-3">
-        <select id="ultimasCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
-        <input type="search" id="ultimasBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
-      </div>
-
-      <div class="flex flex-wrap gap-1.5 mb-5">
-        <button class="pill active" id="ultimasRapido">Se agotan más rápido (≤30 días)</button>
-        <button class="pill" id="ultimasTodos">Todos los productos</button>
-      </div>
-
-      <div id="ultimasLista" class="space-y-3"></div>
-    </div>
 
     <!-- ===================== PRODUCTOS VENDIDOS ===================== -->
-    <div class="view" data-view="vendidos">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏆 Productos vendidos</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4" id="vendidosCount"></p>
-
-      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoVendidos"></div>
-
-      <div class="flex flex-wrap gap-2 items-center mb-3">
-        <select id="vendidosCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
-        <div class="flex gap-1.5" id="vendidosCriterio">
-          <button class="pill active" data-crit="unidades">Por unidades</button>
-          <button class="pill" data-crit="facturacion">Por facturación</button>
-        </div>
-        <div class="flex gap-1.5" id="vendidosVistaSel">
-          <button class="pill active" data-vista="sinVariantes">Sin variantes</button>
-          <button class="pill" data-vista="conVariantes">Con variantes</button>
-        </div>
-        <input type="search" id="vendidosBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
-      </div>
-
-      <div class="card p-5 mb-4 border-indigo-200 bg-indigo-50/40" id="vendidosGanadoresBox">
-        <div class="flex items-center justify-between mb-1">
-          <div class="font-bold text-sm text-indigo-800">🏅 Productos ganadores</div>
-          <span class="text-xs text-indigo-500" id="vendidosGanadoresPromedio"></span>
-        </div>
-        <p class="text-xs text-slate-500 mb-3" id="vendidosGanadoresDesc"></p>
-        <div id="vendidosGanadoresLista" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
-      </div>
-
-      <div class="card overflow-hidden">
-        <div class="px-4 py-2 text-xs text-slate-400 border-b border-slate-100 bg-slate-50">💡 Hacé click en un producto para ver qué colores y talles reponer.</div>
-        <table class="w-full text-sm">
-          <thead id="vendidosTablaHead">
-            <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
-              <th class="py-2.5 px-4">#</th>
-              <th class="py-2.5 px-4">Producto</th>
-              <th class="py-2.5 px-4">Color que más sale</th>
-              <th class="py-2.5 px-4 text-right">Unidades</th>
-              <th class="py-2.5 px-4 text-right">Pedidos</th>
-              <th class="py-2.5 px-4 text-right">Última venta</th>
-            </tr>
-          </thead>
-          <tbody id="vendidosTabla"></tbody>
-        </table>
-      </div>
-    </div>
 
     <!-- ===================== PRODUCTOS NUEVOS ===================== -->
-    <div class="view" data-view="nuevos">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">✨ Productos nuevos</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4" id="nuevosCount"></p>
-
-      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoNuevos"></div>
-      <input type="search" id="nuevosBuscar" placeholder="Buscar por nombre..." class="w-full border border-slate-200 rounded-lg px-4 py-2.5 text-sm mb-5" />
-
-      <div class="mb-2 flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-green-500"></span>
-        <span class="text-xs font-bold text-slate-500 uppercase tracking-wide" id="nuevosVendieronTitulo">YA VENDIERON</span>
-      </div>
-      <div id="nuevosVendieron" class="space-y-3 mb-6"></div>
-
-      <div class="mb-2 flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
-        <span class="text-xs font-bold text-slate-500 uppercase tracking-wide" id="nuevosSinVentaTitulo">SIN VENTAS</span>
-      </div>
-      <div id="nuevosSinVenta" class="space-y-3"></div>
-    </div>
 
     <!-- ===================== SIN VENTAS ===================== -->
-    <div class="view" data-view="sinventas">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">📭 Sin ventas</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-4" id="sinventasCount"></p>
-
-      <div class="flex flex-wrap gap-1.5 mb-3" id="pillsPeriodoSinVentas"></div>
-
-      <div class="flex flex-wrap gap-2 items-center mb-3">
-        <select id="sinventasCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"><option value="">Todas las categorías</option></select>
-        <div class="flex gap-1.5" id="sinventasStockFiltro">
-          <button class="pill active" data-crit="conStock">Con stock</button>
-          <button class="pill" data-crit="todos">Todos</button>
-          <button class="pill" data-crit="sinStock">Sin stock</button>
-        </div>
-      </div>
-
-      <div class="flex flex-wrap gap-2 items-center mb-5">
-        <span class="text-xs text-slate-500 font-medium">Ordenar:</span>
-        <div class="flex flex-wrap gap-1.5" id="sinventasOrden">
-          <button class="pill active" data-crit="masNuevos">Más nuevos</button>
-          <button class="pill" data-crit="mayorStock">Mayor stock</button>
-          <button class="pill" data-crit="menorStock">Menor stock</button>
-          <button class="pill" data-crit="sinVenderMasTiempo">Sin vender más tiempo</button>
-          <button class="pill" data-crit="nombre">Nombre</button>
-        </div>
-        <input type="search" id="sinventasBuscar" placeholder="Buscar producto..." class="flex-1 min-w-[180px] border border-slate-200 rounded-lg px-3 py-1.5 text-sm" />
-      </div>
-
-      <div id="sinventasLista" class="space-y-3"></div>
-    </div>
 
     <!-- ===================== OBJETIVOS ===================== -->
     <div class="view" data-view="objetivos">
@@ -486,67 +330,8 @@
       <div id="clContenido" class="space-y-8"></div>
     </div>
 
-    <div class="view" data-view="ganadores">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏅 Productos ganadores</h1>
-      <p class="text-sm text-slate-500 mt-1 mb-1" id="ganadoresDesc"></p>
-      <p class="text-xs text-slate-400 mb-4">Cortado = suma de lo cortado en Fábrica en el período, para los artículos cuyo código de Fábrica coincide con el inicio del SKU de Tiendanube. Si no hay match, esa línea no se muestra (no significa que no se cortó nada). Tocá una tarjeta para ver colores y talles.</p>
-
-      <div class="flex flex-wrap items-center gap-2 mb-5">
-        <div class="flex gap-1.5" id="ganadoresPeriodo">
-          <button class="pill active" data-periodo="mensual">Este mes</button>
-          <button class="pill" data-periodo="quincena">Última quincena</button>
-        </div>
-        <select id="ganadoresCategoria" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm"></select>
-        <div class="flex gap-1.5" id="ganadoresOrdenModo">
-          <button class="pill active" data-modo="auto">Automático</button>
-          <button class="pill" data-modo="manual">✋ Mi orden</button>
-        </div>
-        <span class="text-xs text-slate-400" id="ganadoresOrdenHint"></span>
-      </div>
-
-      <div id="ganadoresGrid" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3"></div>
-    </div>
 
     <!-- ===================== MODAL REPOSICIÓN ===================== -->
-    <div id="modalReposicion" class="hidden fixed inset-0 bg-black/40 items-center justify-center z-50 p-4" onclick="if(event.target===this) cerrarReposicion();">
-      <div class="bg-white rounded-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6">
-        <div class="flex items-start justify-between mb-1 gap-3">
-          <div class="min-w-0">
-            <div class="text-[11px] font-semibold text-indigo-500 uppercase tracking-wide" id="reposicionPeriodoLabel"></div>
-            <h2 class="text-lg font-bold text-slate-900 leading-tight" id="reposicionTitulo"></h2>
-          </div>
-          <button class="text-slate-400 hover:text-slate-700 text-2xl leading-none flex-shrink-0" onclick="cerrarReposicion()">&times;</button>
-        </div>
-        <div class="flex items-center justify-between gap-3 mb-1">
-          <p class="text-xs text-slate-400 mt-1 mb-0">Prioridad calculada según stock actual vs. velocidad de venta en el período elegido.</p>
-          <button id="btnMandarFabrica" class="px-3 py-1.5 text-xs font-semibold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors flex-shrink-0 whitespace-nowrap" onclick="mandarReposicionAFabrica()">🧵 Mandar corte a Fábrica</button>
-        </div>
-        <div id="reposicionFabricaEstado" class="text-xs mb-3"></div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-          <div class="card p-4">
-            <div class="font-bold text-sm mb-2">🎨 Colores a reponer</div>
-            <div id="reposicionColores" class="space-y-1.5 text-sm"></div>
-          </div>
-          <div class="card p-4">
-            <div class="font-bold text-sm mb-2">📐 Talles para hacer énfasis</div>
-            <div id="reposicionTalles" class="space-y-1.5 text-sm"></div>
-          </div>
-        </div>
-
-        <div class="card p-4 mb-5">
-          <div class="font-bold text-sm mb-2">📦 Stock por color</div>
-          <div id="reposicionStockColor" class="space-y-1.5 text-sm"></div>
-        </div>
-
-        <div class="card overflow-hidden">
-          <table class="w-full text-sm">
-            <thead id="reposicionTablaHead"></thead>
-            <tbody id="reposicionTabla"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
 
   </div>
 </main>
@@ -562,16 +347,6 @@
 
   let data = null;
   let periodoDash = "30dias";
-  let periodoUltimas = "30dias";
-  let periodoVendidos = "30dias";
-  let periodoNuevos = "15dias";
-  let periodoSinVentas = "30dias";
-
-  let stockOrden = "nombre", stockBuscar = "", stockMin = null, stockMax = null, stockCategoria = "", stockOcultos = false;
-  let ultimasRapido = true, ultimasCategoria = "", ultimasBuscar = "";
-  let vendidosCriterio = "unidades", vendidosCategoria = "", vendidosBuscar = "", vendidosVista = "sinVariantes";
-  let nuevosBuscar = "";
-  let sinventasStock = "conStock", sinventasOrden = "masNuevos", sinventasCategoria = "", sinventasBuscar = "";
 
   let objetivosPeriodo = "mensual";
   let objetivosLocal = {};
@@ -2634,51 +2409,6 @@
   document.addEventListener("keydown", e => { if (e.key === "Escape" && pmId != null) pmCerrar(); });
 
   // ---------------- Stock general ----------------
-  function renderStock() {
-    llenarSelectCategorias("stockCategoria", stockCategoria);
-    let productos = [...(data.productos || [])];
-    if (!stockOcultos) productos = productos.filter(p => p.publicado);
-    if (stockCategoria) productos = productos.filter(p => productoEnCategoria(p, stockCategoria));
-    if (stockBuscar.trim()) { const q = clNorm(stockBuscar); productos = productos.filter(p => clNorm(p.producto + " " + (p.variantes || []).map(v => v.sku || "").join(" ")).includes(q)); }
-    if (stockMin !== null) productos = productos.filter(p => p.stockTotal >= stockMin);
-    if (stockMax !== null) productos = productos.filter(p => p.stockTotal <= stockMax);
-
-    const sorters = {
-      nombre: (a, b) => a.producto.localeCompare(b.producto, "es"),
-      mayorStock: (a, b) => b.stockTotal - a.stockTotal,
-      menorStock: (a, b) => a.stockTotal - b.stockTotal,
-      mayorValor: (a, b) => (b.stockValorTotal || 0) - (a.stockValorTotal || 0),
-      masVendidos: (a, b) => b.ventasTotales.unidades - a.ventasTotales.unidades,
-      masRecientes: (a, b) => new Date(b.creado || 0) - new Date(a.creado || 0),
-      masAntiguos: (a, b) => new Date(a.creado || 0) - new Date(b.creado || 0),
-    };
-    productos.sort(sorters[stockOrden] || sorters.nombre);
-
-    document.getElementById("stockCount").textContent = `${productos.length} productos · tocá uno para ver la ficha completa (stock por color y talle, ventas, clasificación)`;
-
-    document.getElementById("stockLista").innerHTML = productos.slice(0, 150).map((p, idx) => {
-      const chips = p.stockPorColor.slice(0, 4).map(c => `<span class="chip ${c.stock <= 0 ? "chip-low" : "chip-ok"}">${c.color}: ${c.stock}</span>`).join(" ");
-      const extra = p.stockPorColor.length > 4 ? `<span class="text-xs text-slate-400">+${p.stockPorColor.length - 4} colores</span>` : "";
-      const valorLine = stockOrden === "mayorValor" ? `<div class="text-xs text-slate-500 font-semibold mt-0.5">Valor en stock: ${fmtMoney(p.stockValorTotal)}</div>` : "";
-      return `
-      <div class="card p-4 flex items-center gap-4 cursor-pointer hover:border-indigo-300" data-prodopen="${p.id}" style="box-shadow:inset 4px 0 0 ${FL_ESTADOS[flEstado(p)].c}">
-        <img src="${p.imagen || ""}" class="w-24 h-28 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
-        <div class="flex-1 min-w-0">
-          <div class="font-bold text-sm mb-1.5">${p.producto}</div>
-          <div class="flex flex-wrap gap-1.5 items-center">${chips}${extra}</div>
-          <div class="text-xs mt-1.5 flex flex-wrap gap-x-3 gap-y-1 items-center"><span class="chip" style="background:${FL_ESTADOS[flEstado(p)].c};color:#fff">${FL_ESTADOS[flEstado(p)].l}</span>
-            <span class="text-indigo-500 font-semibold">${fmtNum(clVend(p, "30dias"))} vend. 30 d · ${fmtNum(p.ventasTotales.unidades)} en total</span>
-            <span class="text-slate-500">${(d => d == null ? "" : d === Infinity ? "sin ventas" : "~" + Math.round(d) + " días de stock")(focoDiasStock(p))}</span>
-            ${(clDe(p) || {}).base ? `<span class="text-slate-500">${focoEsc(clDe(p).base)}${clGrupo(p) ? " · " + focoEsc(clGrupo(p)) : ""}</span>` : `<span style="color:#b45309">sin clasificar</span>`}</div>
-          ${valorLine}
-        </div>
-        <div class="text-right flex-shrink-0">
-          <div class="text-xl font-bold">${fmtNum(p.stockTotal)}</div>
-          <div class="text-xs text-slate-400">unid.</div>
-        </div>
-      </div>`;
-    }).join("") || '<div class="text-slate-400 text-sm p-4">No se encontraron productos.</div>';
-  }
 
   // ---------------- Últimas unidades ----------------
   function diasHastaAgotarse(p, periodo) {
@@ -2689,117 +2419,12 @@
     return p.stockTotal / ritmo;
   }
 
-  function renderUltimas() {
-    pillsHtml("pillsPeriodoUltimas", periodoUltimas, (k) => { periodoUltimas = k; renderUltimas(); });
-    llenarSelectCategorias("ultimasCategoria", ultimasCategoria);
-
-    let productos = [...(data.productos || [])].filter(p => p.stockTotal > 0);
-    if (ultimasCategoria) productos = productos.filter(p => productoEnCategoria(p, ultimasCategoria));
-    if (ultimasBuscar.trim()) { const q = ultimasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
-
-    productos = productos.map(p => ({ p, dias: diasHastaAgotarse(p, periodoUltimas), vendidas: p.ventasPorPeriodo[periodoUltimas]?.unidades || 0 }))
-      .filter(x => x.vendidas > 0);
-
-    if (ultimasRapido) productos = productos.filter(x => x.dias <= 30);
-    productos.sort((a, b) => a.dias - b.dias);
-
-    document.getElementById("ultimasLista").innerHTML = productos.slice(0, 100).map(({ p, dias, vendidas }) => {
-      const diasDelPeriodo = (data.periodosDias || {})[periodoUltimas] || 30;
-      const ritmo = (vendidas / diasDelPeriodo).toFixed(1);
-      const v = p.ventasPorPeriodo[periodoUltimas];
-      const colorTop = v?.colorMasVendido ? `· repone <b>${v.colorMasVendido.color}</b> (${fmtNum(v.colorMasVendido.unidades)} vendidas)` : "";
-      return `
-      <div class="card p-4 flex items-center gap-4 ${dias <= 15 ? "border-amber-300" : ""}">
-        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
-        <div class="flex-1 min-w-0">
-          <div class="font-bold text-sm mb-1">${p.producto}</div>
-          <div class="text-xs text-slate-500"><b>${fmtNum(p.stockTotal)}</b> stock · <b>${fmtNum(vendidas)}</b> vendidas · ${ritmo}/día ${colorTop}</div>
-          <div class="mt-1"><span class="chip chip-amber">~${Math.round(dias)} días</span></div>
-        </div>
-      </div>`;
-    }).join("") || '<div class="text-slate-400 text-sm p-4">Sin productos que se estén por agotar en este período.</div>';
-  }
 
   // ---------------- Productos vendidos ----------------
-  function renderVendidos() {
-    pillsHtml("pillsPeriodoVendidos", periodoVendidos, (k) => { periodoVendidos = k; renderVendidos(); });
-    llenarSelectCategorias("vendidosCategoria", vendidosCategoria);
 
-    let productos = [...(data.productos || [])];
-    if (vendidosCategoria) productos = productos.filter(p => productoEnCategoria(p, vendidosCategoria));
-    if (vendidosBuscar.trim()) { const q = vendidosBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
-
-    productos = productos.filter(p => (p.ventasPorPeriodo[periodoVendidos]?.unidades || 0) > 0);
-    productos.sort((a, b) => (b.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) - (a.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0));
-
-    document.getElementById("vendidosCount").textContent = `${productos.length} productos con ventas`;
-
-    renderGanadores(productos);
-
-    if (vendidosVista === "conVariantes") renderVendidosConVariantes(productos);
-    else renderVendidosSinVariantes(productos);
-  }
-
-  function renderVendidosSinVariantes(productos) {
-    document.getElementById("vendidosTablaHead").innerHTML = `
-      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
-        <th class="py-2.5 px-4">#</th>
-        <th class="py-2.5 px-4">Producto</th>
-        <th class="py-2.5 px-4">Color que más sale</th>
-        <th class="py-2.5 px-4 text-right">Unidades</th>
-        <th class="py-2.5 px-4 text-right">Pedidos</th>
-        <th class="py-2.5 px-4 text-right">Última venta</th>
-      </tr>`;
-
-    document.getElementById("vendidosTabla").innerHTML = productos.slice(0, 100).map((p, i) => {
-      const v = p.ventasPorPeriodo[periodoVendidos];
-      const colorTop = v.colorMasVendido ? `${v.colorMasVendido.color} (${fmtNum(v.colorMasVendido.unidades)} u.)` : "—";
-      return `
-      <tr class="border-b border-slate-50">
-        <td class="py-2.5 px-4 text-slate-400">${i + 1}</td>
-        <td class="py-2.5 px-4 font-semibold text-indigo-700 hover:underline cursor-pointer" onclick="abrirReposicion('${p.id}')">${p.producto}</td>
-        <td class="py-2.5 px-4 text-slate-500">${colorTop}</td>
-        <td class="py-2.5 px-4 text-right font-bold text-indigo-600">${vendidosCriterio === "facturacion" ? fmtMoney(v.facturacion) : fmtNum(v.unidades)}</td>
-        <td class="py-2.5 px-4 text-right">${fmtNum(v.pedidos)}</td>
-        <td class="py-2.5 px-4 text-right text-slate-400">${fmtFecha(p.ventasTotales.ultimaVenta)}</td>
-      </tr>`;
-    }).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
-  }
 
   // "Con variantes": desglosa cada producto en sus combinaciones color/talle
   // vendidas en el período, ordenadas dentro de cada producto por el criterio elegido.
-  function renderVendidosConVariantes(productos) {
-    document.getElementById("vendidosTablaHead").innerHTML = `
-      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
-        <th class="py-2.5 px-4">#</th>
-        <th class="py-2.5 px-4">Producto</th>
-        <th class="py-2.5 px-4">Color</th>
-        <th class="py-2.5 px-4">Talle</th>
-        <th class="py-2.5 px-4 text-right">Unidades</th>
-        <th class="py-2.5 px-4 text-right">Facturación</th>
-      </tr>`;
-
-    let filas = [];
-    productos.slice(0, 100).forEach((p) => {
-      const v = p.ventasPorPeriodo[periodoVendidos];
-      const variantes = (v.variantesVendidas && v.variantesVendidas.length)
-        ? [...v.variantesVendidas].sort((a, b) => (b[vendidosCriterio] || 0) - (a[vendidosCriterio] || 0))
-        : [{ color: v.colorMasVendido?.color || "—", talle: "—", unidades: v.unidades, facturacion: v.facturacion }];
-      variantes.forEach((vari, idx) => {
-        filas.push({ id: p.id, producto: p.producto, primero: idx === 0, cantVariantes: variantes.length, vari });
-      });
-    });
-
-    document.getElementById("vendidosTabla").innerHTML = filas.map((f, i) => `
-      <tr class="border-b border-slate-50 ${f.primero ? "" : "bg-slate-50/40"}">
-        <td class="py-2 px-4 text-slate-400">${f.primero ? "" : ""}</td>
-        <td class="py-2 px-4 ${f.primero ? "font-semibold text-indigo-700 hover:underline cursor-pointer" : "text-slate-400 pl-6"}" ${f.primero ? `onclick="abrirReposicion('${f.id}')"` : ""}>${f.primero ? f.producto : "↳"}</td>
-        <td class="py-2 px-4 text-slate-600">${f.vari.color || "—"}</td>
-        <td class="py-2 px-4 text-slate-600">${f.vari.talle || "—"}</td>
-        <td class="py-2 px-4 text-right font-bold text-indigo-600">${fmtNum(f.vari.unidades)}</td>
-        <td class="py-2 px-4 text-right text-slate-500">${fmtMoney(f.vari.facturacion)}</td>
-      </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin ventas en este período.</td></tr>';
-  }
 
   // ---------------- Reposición por variante (color/talle) ----------------
   function diasParaPeriodo(periodo) {
@@ -2878,555 +2503,34 @@
     return arr;
   }
 
-  let reposicionProductoActivo = null;
-
-  function abrirReposicion(productId) {
-    const p = (data.productos || []).find(x => String(x.id) === String(productId));
-    if (!p) return;
-    reposicionProductoActivo = p;
-    const periodo = periodoVendidos;
-    const filas = calcularReposicion(p, periodo);
-    const porColor = agruparReposicion(filas, "color", periodo);
-    const porTalle = agruparReposicion(filas, "talle", periodo);
-    const periodoLabel = (PERIODOS.find(x => x.key === periodo) || {}).label || periodo;
-
-    document.getElementById("reposicionPeriodoLabel").textContent = `Reposición sugerida · ${periodoLabel}`;
-    document.getElementById("reposicionTitulo").textContent = p.producto;
-
-    const filaResumen = (g, campo) => `
-      <div class="flex items-center justify-between gap-2">
-        <span class="truncate">${g[campo]}</span>
-        <span class="flex items-center gap-2 flex-shrink-0">
-          <span class="text-xs text-slate-400">${fmtNum(g.unidades)} v. / ${fmtNum(g.stock)} stock</span>
-          <span class="chip ${g.chip}">${g.prioridad}</span>
-        </span>
-      </div>`;
-
-    document.getElementById("reposicionColores").innerHTML = porColor.map(g => filaResumen(g, "color")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
-    document.getElementById("reposicionTalles").innerHTML = porTalle.map(g => filaResumen(g, "talle")).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
-
-    // Stock por color, de más a menos — para ver de un vistazo dónde queda concentrado el stock actual.
-    const stockPorColor = [...porColor].sort((a, b) => b.stock - a.stock);
-    document.getElementById("reposicionStockColor").innerHTML = stockPorColor.map(g => `
-      <div class="flex items-center justify-between gap-2">
-        <span class="truncate">${g.color}</span>
-        <span class="text-xs text-slate-500 flex-shrink-0">${fmtNum(g.stock)} u.</span>
-      </div>`).join("") || '<div class="text-slate-400 text-sm">Sin datos.</div>';
-
-    reposicionFilas = filas;
-    reposicionOrdenCampo = "prioridad";
-    reposicionOrdenDir = "asc";
-    renderReposicionTabla();
-    document.getElementById("reposicionFabricaEstado").textContent = "";
-    document.getElementById("btnMandarFabrica").disabled = false;
-    verificarCorteFabricaExistente(p);
-
-    const modal = document.getElementById("modalReposicion");
-    modal.classList.remove("hidden");
-    modal.classList.add("flex");
-  }
-
-  // ---------------- Mandar a Fábrica (corte de reposición) ----------------
-  // Escribe directo en el mismo proyecto de Firebase que usa la app de Fábrica
-  // (bynina-c1eec, path fabrica_v5/), en la sección "Pendiente armar tizada" —
-  // se saltea Moldería/Nuevos Desarrollos porque el artículo ya existe y ya
-  // tiene molde aprobado. El código de Fábrica no se auto-completa (no hay
-  // forma confiable de derivarlo del SKU de Tiendanube) — queda marcado para
-  // que Peque/Ariel lo complete apenas lo abren.
-  function coloresAReponerDe(p) {
-    const periodo = periodoVendidos;
-    const filas = calcularReposicion(p, periodo);
-    return agruparReposicion(filas, "color", periodo).filter(g => g.orden === 0 || g.orden === 1);
-  }
-
-  async function getSeccionPendienteTizadaId() {
-    const snap = await db.ref("fabrica_v5/sections").once("value");
-    const sections = snap.val() || {};
-    const found = Object.entries(sections).find(([, s]) => (s.title || "").trim().toLowerCase() === "pendiente armar tizada");
-    return found ? found[0] : null;
-  }
-
-  async function verificarCorteFabricaExistente(p) {
-    const estadoEl = document.getElementById("reposicionFabricaEstado");
-    try {
-      const snap = await db.ref("fabrica_v5/sections").once("value");
-      const sections = snap.val() || {};
-      let encontrado = null;
-      Object.values(sections).forEach(sec => {
-        Object.values(sec.items || {}).forEach(it => {
-          if (it.dashboard_producto_id === p.id && !it.done && !encontrado) encontrado = it;
-        });
-      });
-      if (encontrado) {
-        estadoEl.className = "text-xs mb-3 text-amber-600 font-semibold";
-        estadoEl.textContent = `🧵 Ya hay un corte de este producto en Fábrica (${encontrado.code || "sin código todavía"}).`;
-      } else {
-        estadoEl.className = "text-xs mb-3 text-slate-400";
-        estadoEl.textContent = "";
-      }
-    } catch (e) { /* si falla la lectura, no bloqueamos el flujo normal del modal */ }
-  }
-
-  async function mandarReposicionAFabrica() {
-    const p = reposicionProductoActivo;
-    if (!p) return;
-    const btn = document.getElementById("btnMandarFabrica");
-    const estadoEl = document.getElementById("reposicionFabricaEstado");
-    const colores = coloresAReponerDe(p);
-    if (!colores.length) { alert("Este producto no tiene colores marcados como 'Reponer urgente' o 'Reponer pronto' en el período elegido."); return; }
-
-    btn.disabled = true;
-    btn.textContent = "Enviando...";
-    try {
-      const destId = await getSeccionPendienteTizadaId();
-      if (!destId) { alert('No encontré la sección "Pendiente armar tizada" en Fábrica — revisá que exista con ese nombre exacto.'); btn.disabled = false; btn.textContent = "🧵 Mandar corte a Fábrica"; return; }
-
-      const notaColores = colores.map(c => `${c.color} (${c.prioridad === "Reponer urgente" ? "🔴 urgente, sin stock" : "🟡 pronto"} — ${fmtNum(c.unidades)} vendidas)`).join(" · ");
-      const newItem = {
-        code: "",
-        codigo_pendiente: true,
-        name: p.producto || "",
-        marca: "By Nina",
-        categoria: p.categoria || null,
-        foto: p.imagen || "",
-        base_aprobada: true,
-        origen_reposicion: true,
-        dashboard_producto_id: p.id,
-        colores_reponer: colores.map(c => ({ color: c.color, unidades: c.unidades, prioridad: c.prioridad })),
-        nota: `🔁 Reposición automática desde Dashboard. Colores a priorizar: ${notaColores}. Completar código de Fábrica y curva de talles a mano.`,
-        done: false,
-        avios: {},
-        fecha_ingreso: Date.now(),
-        fecha_etapa: Date.now(),
-      };
-      await db.ref(`fabrica_v5/sections/${destId}/items`).push(newItem);
-      estadoEl.className = "text-xs mb-3 text-green-600 font-semibold";
-      estadoEl.textContent = "✓ Corte enviado a Fábrica — Pendiente armar tizada.";
-      btn.textContent = "✓ Enviado";
-    } catch (e) {
-      estadoEl.className = "text-xs mb-3 text-red-500 font-semibold";
-      estadoEl.textContent = "Error al enviar: " + e.message;
-      btn.disabled = false;
-      btn.textContent = "🧵 Mandar corte a Fábrica";
-    }
-  }
-
   // Orden de talles habituales para que "Ordenar por talle" tenga sentido
   // (S antes que M antes que L) en vez de orden alfabético puro.
   const TALLE_ORDEN = { "XS": 0, "S": 1, "M": 2, "L": 3, "XL": 4, "XXL": 5, "XXXL": 6 };
 
-  const REPOSICION_COLUMNAS = [
-    { campo: "color", label: "Color", align: "left" },
-    { campo: "talle", label: "Talle", align: "left" },
-    { campo: "unidades", label: "Vendidos", align: "right" },
-    { campo: "stock", label: "Stock", align: "right" },
-    { campo: "diasStock", label: "Días de stock", align: "right" },
-    { campo: "prioridad", label: "Prioridad", align: "left" },
-  ];
 
-  let reposicionFilas = [];
-  let reposicionOrdenCampo = "prioridad";
-  let reposicionOrdenDir = "asc";
 
-  function ordenarReposicion(campo) {
-    if (reposicionOrdenCampo === campo) {
-      reposicionOrdenDir = reposicionOrdenDir === "asc" ? "desc" : "asc";
-    } else {
-      reposicionOrdenCampo = campo;
-      // Texto arranca ascendente (A-Z); números y prioridad arrancan mostrando lo más relevante primero.
-      reposicionOrdenDir = (campo === "color" || campo === "talle") ? "asc" : "desc";
-    }
-    renderReposicionTabla();
-  }
 
-  function renderReposicionTabla() {
-    const campo = reposicionOrdenCampo;
-    const dir = reposicionOrdenDir;
-    const mult = dir === "asc" ? 1 : -1;
 
-    const filas = [...reposicionFilas].sort((a, b) => {
-      let va, vb;
-      if (campo === "prioridad") { va = a.orden; vb = b.orden; }
-      else if (campo === "talle") { va = TALLE_ORDEN[a.talle] ?? 99; vb = TALLE_ORDEN[b.talle] ?? 99; }
-      else if (campo === "diasStock") { va = a.diasStock === null ? Infinity : a.diasStock; vb = b.diasStock === null ? Infinity : b.diasStock; }
-      else { va = a[campo]; vb = b[campo]; }
-
-      const result = typeof va === "string" ? va.localeCompare(vb, "es") * mult : (va - vb) * mult;
-
-      // Desempate: si no estamos ordenando ya por talle, usamos el orden lógico de talles
-      // (S, M, L, XL...) en vez de "más vendido primero", para que la grilla no salga
-      // en orden alfabético de talle cuando ordenás por color (esto antes no se aplicaba
-      // en columnas de texto porque el return anterior cortaba antes de llegar acá).
-      if (result === 0 && campo !== "talle") {
-        const ta = TALLE_ORDEN[a.talle] ?? 99, tb = TALLE_ORDEN[b.talle] ?? 99;
-        if (ta !== tb) return ta - tb;
-        return b.unidades - a.unidades;
-      }
-      return result;
-    });
-
-    document.getElementById("reposicionTablaHead").innerHTML = `
-      <tr class="text-left text-slate-400 text-xs uppercase border-b border-slate-100 bg-slate-50">
-        ${REPOSICION_COLUMNAS.map(c => `
-          <th class="py-2 px-3 ${c.align === "right" ? "text-right" : ""} cursor-pointer select-none hover:text-slate-600" onclick="ordenarReposicion('${c.campo}')">
-            ${c.label}${reposicionOrdenCampo === c.campo ? (reposicionOrdenDir === "asc" ? " ▲" : " ▼") : ""}
-          </th>`).join("")}
-      </tr>`;
-
-    document.getElementById("reposicionTabla").innerHTML = filas.map(f => `
-      <tr class="border-b border-slate-50">
-        <td class="py-2 px-3">${f.color}</td>
-        <td class="py-2 px-3">${f.talle}</td>
-        <td class="py-2 px-3 text-right font-semibold">${fmtNum(f.unidades)}</td>
-        <td class="py-2 px-3 text-right">${fmtNum(f.stock)}</td>
-        <td class="py-2 px-3 text-right text-slate-500">${f.diasStock === null ? "—" : fmtNum(f.diasStock)}</td>
-        <td class="py-2 px-3"><span class="chip ${f.chip}">${f.prioridad}</span></td>
-      </tr>`).join("") || '<tr><td colspan="6" class="text-center text-slate-400 py-6">Sin datos.</td></tr>';
-  }
-
-  function cerrarReposicion() {
-    const modal = document.getElementById("modalReposicion");
-    modal.classList.add("hidden");
-    modal.classList.remove("flex");
-  }
 
   // "Productos ganadores": los que venden por encima del promedio (según el
   // criterio elegido: unidades o facturación) entre los productos con venta
   // en el período/categoría/búsqueda actual. Para cada uno se muestra el
   // color y el talle que más vendieron.
-  function renderGanadores(productos) {
-    const valores = productos.map(p => p.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0);
-    const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
-
-    const ganadores = productos
-      .filter(p => (p.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) > promedio)
-      .sort((a, b) => (b.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0) - (a.ventasPorPeriodo[periodoVendidos]?.[vendidosCriterio] || 0));
-
-    const promedioFmt = vendidosCriterio === "facturacion" ? fmtMoney(promedio) : fmtNum(promedio) + " u.";
-    document.getElementById("vendidosGanadoresPromedio").textContent = productos.length ? `Promedio: ${promedioFmt}` : "";
-    document.getElementById("vendidosGanadoresDesc").textContent = productos.length
-      ? `${ganadores.length} de ${productos.length} productos venden por encima del promedio en este período${vendidosCategoria ? " (dentro de " + vendidosCategoria + ")" : ""}.`
-      : "Sin ventas en este período para calcular un promedio.";
-
-    document.getElementById("vendidosGanadoresLista").innerHTML = ganadores.slice(0, 12).map(p => {
-      const v = p.ventasPorPeriodo[periodoVendidos];
-      const valor = v[vendidosCriterio] || 0;
-      const pct = promedio > 0 ? ((valor - promedio) / promedio) * 100 : 0;
-      const colorTop = v.colorMasVendido ? `${v.colorMasVendido.color} (${fmtNum(v.colorMasVendido.unidades)} u.)` : "—";
-      const talleTop = v.talleMasVendido ? `${v.talleMasVendido.talle} (${fmtNum(v.talleMasVendido.unidades)} u.)` : "—";
-      return `
-      <div class="bg-white border border-indigo-100 rounded-lg px-3.5 py-2.5">
-        <div class="flex items-center justify-between gap-2">
-          <div class="font-semibold text-sm text-slate-800 truncate">${p.producto}</div>
-          <span class="chip chip-green flex-shrink-0">▲ ${pct.toFixed(0)}%</span>
-        </div>
-        <div class="text-xs text-slate-500 mt-1">${vendidosCriterio === "facturacion" ? fmtMoney(valor) : fmtNum(valor) + " u."}</div>
-        <div class="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-500 mt-1.5">
-          <span>🎨 Color top: <b class="text-slate-700">${colorTop}</b></span>
-          <span>📐 Talle top: <b class="text-slate-700">${talleTop}</b></span>
-        </div>
-      </div>`;
-    }).join("") || '<div class="text-slate-400 text-sm col-span-2">Ningún producto supera el promedio todavía.</div>';
-  }
 
   // ---------------- Productos nuevos ----------------
-  function renderNuevos() {
-    const PERIODOS_NUEVOS = [{ key: "7dias", label: "Últimos 7 días" }, { key: "15dias", label: "Últimos 15 días" }, { key: "30dias", label: "Último mes" }];
-    const el = document.getElementById("pillsPeriodoNuevos");
-    el.innerHTML = PERIODOS_NUEVOS.map(p => `<button class="pill ${p.key === periodoNuevos ? "active" : ""}" data-key="${p.key}">${p.label}</button>`).join("");
-    el.querySelectorAll("button").forEach(btn => btn.addEventListener("click", () => { periodoNuevos = btn.dataset.key; renderNuevos(); }));
-
-    const dias = (data.periodosDias || {})[periodoNuevos] || 15;
-    const corte = new Date(); corte.setDate(corte.getDate() - dias);
-
-    let productos = (data.productos || []).filter(p => p.creado && new Date(p.creado) >= corte);
-    if (nuevosBuscar.trim()) { const q = nuevosBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
-
-    const vendieron = productos.filter(p => p.ventasTotales.unidades > 0).sort((a, b) => new Date(b.creado) - new Date(a.creado));
-    const sinVenta = productos.filter(p => p.ventasTotales.unidades === 0).sort((a, b) => new Date(b.creado) - new Date(a.creado));
-
-    document.getElementById("nuevosCount").textContent = `${productos.length} productos agregados · ${vendieron.length} ya vendieron · ${sinVenta.length} sin ventas`;
-    document.getElementById("nuevosVendieronTitulo").textContent = `YA VENDIERON (${vendieron.length})`;
-    document.getElementById("nuevosSinVentaTitulo").textContent = `SIN VENTAS (${sinVenta.length})`;
-
-    function card(p) {
-      return `
-      <div class="card p-4 flex items-center gap-4">
-        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
-        <div class="flex-1 min-w-0">
-          <div class="font-bold text-sm">${p.producto}</div>
-          <div class="text-xs text-slate-400 mt-0.5">${p.categoria} · alta ${fmtFecha(p.creado)}</div>
-          ${p.ventasTotales.unidades > 0 ? `<span class="chip chip-green mt-1 inline-block">${fmtNum(p.ventasTotales.unidades)} vendidas</span>` : ""}
-        </div>
-        <div class="text-right flex-shrink-0"><div class="text-lg font-bold">${fmtNum(p.stockTotal)}</div><div class="text-xs text-slate-400">unid.</div></div>
-      </div>`;
-    }
-    document.getElementById("nuevosVendieron").innerHTML = vendieron.map(card).join("") || '<div class="text-slate-400 text-sm">Ninguno todavía.</div>';
-    document.getElementById("nuevosSinVenta").innerHTML = sinVenta.map(card).join("") || '<div class="text-slate-400 text-sm">Todos vendieron.</div>';
-  }
 
   // ---------------- Sin ventas ----------------
-  function renderSinVentas() {
-    pillsHtml("pillsPeriodoSinVentas", periodoSinVentas, (k) => { periodoSinVentas = k; renderSinVentas(); });
-    llenarSelectCategorias("sinventasCategoria", sinventasCategoria);
-
-    let productos = (data.productos || []).filter(p => (p.ventasPorPeriodo[periodoSinVentas]?.unidades || 0) === 0);
-    if (sinventasCategoria) productos = productos.filter(p => productoEnCategoria(p, sinventasCategoria));
-    if (sinventasBuscar.trim()) { const q = sinventasBuscar.trim().toLowerCase(); productos = productos.filter(p => p.producto.toLowerCase().includes(q)); }
-
-    if (sinventasStock === "conStock") productos = productos.filter(p => p.stockTotal > 0);
-    else if (sinventasStock === "sinStock") productos = productos.filter(p => p.stockTotal === 0);
-
-    const sorters = {
-      masNuevos: (a, b) => new Date(b.creado || 0) - new Date(a.creado || 0),
-      mayorStock: (a, b) => b.stockTotal - a.stockTotal,
-      menorStock: (a, b) => a.stockTotal - b.stockTotal,
-      sinVenderMasTiempo: (a, b) => new Date(a.ventasTotales.ultimaVenta || 0) - new Date(b.ventasTotales.ultimaVenta || 0),
-      nombre: (a, b) => a.producto.localeCompare(b.producto, "es"),
-    };
-    productos.sort(sorters[sinventasOrden] || sorters.masNuevos);
-
-    document.getElementById("sinventasCount").textContent = `${productos.length} productos sin ventas`;
-
-    document.getElementById("sinventasLista").innerHTML = productos.slice(0, 100).map(p => `
-      <div class="card p-4 flex items-center gap-4">
-        <img src="${p.imagen || ""}" class="w-14 h-16 object-cover rounded-lg bg-slate-100 flex-shrink-0" onerror="this.style.visibility='hidden'" />
-        <div class="flex-1 min-w-0">
-          <div class="font-bold text-sm">${p.producto}</div>
-          <div class="text-xs text-slate-400 mt-0.5">${p.categoria} ${p.publicado ? '· <span class="text-green-600 font-semibold">Publicado</span>' : '· <span class="text-slate-400">Oculto</span>'}</div>
-          <div class="text-xs text-slate-400 mt-0.5">Última venta: ${fmtFecha(p.ventasTotales.ultimaVenta)}</div>
-          ${p.colorMasStock ? `<div class="text-xs text-amber-600 font-semibold mt-1">Más stock en: ${p.colorMasStock.color} (${fmtNum(p.colorMasStock.stock)} u.)</div>` : ""}
-        </div>
-        <div class="text-right flex-shrink-0"><div class="text-lg font-bold">${fmtNum(p.stockTotal)}</div><div class="text-xs text-slate-400">unid.</div></div>
-      </div>`).join("") || '<div class="text-slate-400 text-sm p-4">Ningún producto coincide con el filtro.</div>';
-  }
 
   function renderAll() {
-    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } try{ renderClasif(); }catch(e){ console.error(e); } renderStock(); renderUltimas(); renderVendidos(); renderNuevos(); renderSinVentas(); renderObjetivos(); renderGanadoresTab(); try{ renderCyber(); }catch(e){ console.error(e); }
+    renderDashboard(); try{ renderFoco(); }catch(e){ console.error(e); } try{ renderClasif(); }catch(e){ console.error(e); } renderObjetivos(); try{ renderCyber(); }catch(e){ console.error(e); }
   }
 
   // ---------------- Resumen (Web y Local separados, misma estructura en las dos) ----------------
-  // ---------------- Ganadores (pestaña con foto + cortado vs. período) ----------------
-  let ganadoresPeriodo = "mensual";
-  let ganadoresCategoria = "";
-  let ganadoresOrdenModo = "auto"; // "auto" (por unidades vendidas) o "manual" (drag and drop)
-  let ganadoresOrdenManual = []; // array de product ids, en el orden que armó Ariel
-  let fabricaSectionsCache = null; // se carga una sola vez por sesión y se reusa
-
-  async function getFabricaSectionsCache() {
-    if (fabricaSectionsCache) return fabricaSectionsCache;
-    try {
-      const snap = await db.ref("fabrica_v5/sections").once("value");
-      fabricaSectionsCache = snap.val() || {};
-    } catch (e) {
-      fabricaSectionsCache = {};
-    }
-    return fabricaSectionsCache;
-  }
-
-  // Suma lo cortado (item.capas → cant por talle, ya congelado en "Marcar cortado") de todos
-  // los ítems de Fábrica cuyo código matchea el inicio de algún SKU de este producto, con
-  // fecha de corte dentro del período elegido. Si no hay match de código, devuelve null.
-  function cortadoDeItem(item) {
-    return Object.values(item.capas || {}).reduce((s, row) => s + Object.values(row.cant || {}).reduce((s2, n) => s2 + (parseInt(n) || 0), 0), 0);
-  }
-  async function cortadoPorProducto(p, periodo) {
-    const sections = await getFabricaSectionsCache();
-    const skus = (p.variantes || []).map(v => (v.sku || "").toUpperCase()).filter(Boolean);
-    if (!skus.length) return null;
-    const dias = periodo === "quincena" ? 15 : 30;
-    const corte = new Date(); corte.setDate(corte.getDate() - dias);
-    let total = 0, matcheo = false;
-    Object.values(sections).forEach(sec => {
-      Object.values(sec.items || {}).forEach(it => {
-        const code = (it.code || "").toUpperCase();
-        if (!code) return;
-        if (!skus.some(s => s.startsWith(code))) return;
-        if (!it.fecha_corte) return;
-        const f = new Date(it.fecha_corte);
-        if (isNaN(f) || f < corte) return;
-        matcheo = true;
-        total += cortadoDeItem(it);
-      });
-    });
-    return matcheo ? total : null;
-  }
-
-  // Fuente única de "cuáles son los ganadores ahora" (antes de ordenar/filtrar) — la reusan
-  // tanto el cálculo de promedio como el filtro de categoría y el orden manual.
-  function calcularGanadoresBase(periodoVentas) {
-    const productos = (data.productos || []).filter(p => p.ventasPorPeriodo && p.ventasPorPeriodo[periodoVentas]);
-    const valores = productos.map(p => p.ventasPorPeriodo[periodoVentas]?.unidades || 0);
-    const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
-    const ganadores = productos.filter(p => (p.ventasPorPeriodo[periodoVentas]?.unidades || 0) > promedio);
-    return { productos, promedio, ganadores };
-  }
-
-  // Color con más stock disponible de un producto — para sugerir cuál conviene mostrar como
-  // foto principal si la idea es empujar lo que sobra en depósito, no necesariamente lo que ya
-  // es tendencia (la foto de portada hoy suele ser la del color que más vende, no la de más stock).
-  function colorConMasStock(p) {
-    const porColor = {};
-    (p.variantes || []).forEach(v => {
-      if (!v.color) return;
-      porColor[v.color] = (porColor[v.color] || 0) + (v.stock || 0);
-    });
-    const entries = Object.entries(porColor).filter(([, stock]) => stock > 0);
-    if (!entries.length) return null;
-    entries.sort((a, b) => b[1] - a[1]);
-    return { color: entries[0][0], stock: entries[0][1] };
-  }
-
-  async function renderGanadoresTab() {
-    if (!data) return;
-    document.getElementById("ganadoresPeriodo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.periodo === ganadoresPeriodo));
-    document.getElementById("ganadoresOrdenModo").querySelectorAll("button").forEach(b => b.classList.toggle("active", b.dataset.modo === ganadoresOrdenModo));
-    document.getElementById("ganadoresOrdenHint").textContent = ganadoresOrdenModo === "manual" ? "Arrastrá las tarjetas para reordenar." : "";
-
-    const periodoVentas = ganadoresPeriodo === "quincena" ? "15dias" : "estemes";
-    const { productos, promedio, ganadores: ganadoresTodos } = calcularGanadoresBase(periodoVentas);
-
-    // Selector de categoría: se arma con las categorías presentes entre los ganadores del período.
-    const categorias = Array.from(new Set(ganadoresTodos.map(p => p.categoria || "Sin categoría"))).sort();
-    const selCat = document.getElementById("ganadoresCategoria");
-    const catPrevia = ganadoresCategoria;
-    selCat.innerHTML = `<option value="">Todas las categorías</option>` + categorias.map(c => `<option value="${c}">${c}</option>`).join("");
-    selCat.value = categorias.includes(catPrevia) ? catPrevia : "";
-    ganadoresCategoria = selCat.value;
-
-    let ganadores = ganadoresCategoria ? ganadoresTodos.filter(p => (p.categoria || "Sin categoría") === ganadoresCategoria) : ganadoresTodos;
-
-    if (ganadoresOrdenModo === "manual") {
-      const idsSet = new Set(ganadores.map(p => p.id));
-      const enOrden = ganadoresOrdenManual.filter(id => idsSet.has(id));
-      const sinOrden = ganadores.filter(p => !ganadoresOrdenManual.includes(p.id));
-      const porId = new Map(ganadores.map(p => [p.id, p]));
-      ganadores = [...enOrden.map(id => porId.get(id)), ...sinOrden];
-    } else {
-      ganadores.sort((a, b) => (b.ventasPorPeriodo[periodoVentas]?.unidades || 0) - (a.ventasPorPeriodo[periodoVentas]?.unidades || 0));
-    }
-
-    document.getElementById("ganadoresDesc").textContent = productos.length
-      ? `${ganadoresTodos.length} de ${productos.length} productos venden por encima del promedio (${fmtNum(promedio)} u.) — ${ganadoresPeriodo === "quincena" ? "últimos 15 días" : "este mes"}.${ganadoresCategoria ? ` Mostrando "${ganadoresCategoria}" (${ganadores.length}).` : ""}`
-      : "Sin ventas en este período.";
-
-    const grid = document.getElementById("ganadoresGrid");
-    grid.innerHTML = ganadores.slice(0, 40).map(p => {
-      const masStock = colorConMasStock(p);
-      return `
-      <div class="card overflow-hidden cursor-pointer hover:shadow-md transition-shadow" data-ganador-id="${p.id}" ${ganadoresOrdenModo === "manual" ? 'draggable="true"' : ""} onclick="if(!ganadoresArrastrando) abrirReposicion('${p.id}')">
-        <img src="${p.imagen || ""}" class="w-full aspect-square object-cover bg-slate-100" onerror="this.style.visibility='hidden'" />
-        <div class="p-2.5">
-          <div class="font-semibold text-xs text-slate-800 leading-tight" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${p.producto}</div>
-          <div class="text-[11px] text-slate-500 mt-1">${fmtNum(p.ventasPorPeriodo[periodoVentas]?.unidades || 0)} vendidas</div>
-          ${masStock ? `<div class="text-[11px] text-indigo-600 font-semibold mt-0.5">📦 Más stock: ${masStock.color} (${fmtNum(masStock.stock)}u)</div>` : ""}
-          <div class="text-[11px] text-slate-400 ganador-cortado">·</div>
-        </div>
-      </div>`;
-    }).join("") || '<div class="text-slate-400 text-sm col-span-full">Ningún producto supera el promedio todavía.</div>';
-
-    if (ganadoresOrdenModo === "manual") activarDragGanadores(grid);
-
-    // El cruce con Fábrica es async (lee otro proyecto/nodo Firebase) — se resuelve por
-    // separado para no bloquear el render inicial de las tarjetas.
-    ganadores.slice(0, 40).forEach(async p => {
-      const cortado = await cortadoPorProducto(p, ganadoresPeriodo);
-      const el = grid.querySelector(`[data-ganador-id="${p.id}"] .ganador-cortado`);
-      if (!el) return;
-      el.textContent = cortado === null ? "" : `✂️ ${fmtNum(cortado)} cortadas`;
-    });
-  }
-
-  // ---- Drag and drop para "Mi orden" ----
-  let ganadoresArrastrando = false;
-  function activarDragGanadores(grid) {
-    let dragEl = null;
-    grid.querySelectorAll("[data-ganador-id]").forEach(card => {
-      card.addEventListener("dragstart", () => { dragEl = card; ganadoresArrastrando = true; card.style.opacity = "0.4"; });
-      card.addEventListener("dragend", () => {
-        card.style.opacity = "1";
-        setTimeout(() => { ganadoresArrastrando = false; }, 50); // evita que el click posterior al soltar abra el modal
-        guardarOrdenManualGanadores(grid);
-      });
-      card.addEventListener("dragover", e => {
-        e.preventDefault();
-        if (!dragEl || dragEl === card) return;
-        const rect = card.getBoundingClientRect();
-        const after = (e.clientX - rect.left) > rect.width / 2;
-        card.parentNode.insertBefore(dragEl, after ? card.nextSibling : card);
-      });
-    });
-  }
-  function guardarOrdenManualGanadores(grid) {
-    ganadoresOrdenManual = Array.from(grid.querySelectorAll("[data-ganador-id]")).map(el => el.dataset.ganadorId);
-    db.ref("dashboard_ganadores_orden").set(ganadoresOrdenManual);
-  }
-  db.ref("dashboard_ganadores_orden").on("value", snap => {
-    ganadoresOrdenManual = snap.val() || [];
-    if (data && ganadoresOrdenModo === "manual") renderGanadoresTab();
-  });
-
-  document.getElementById("ganadoresCategoria").addEventListener("change", e => {
-    ganadoresCategoria = e.target.value; renderGanadoresTab();
-  });
-  document.getElementById("ganadoresOrdenModo").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    ganadoresOrdenModo = btn.dataset.modo; renderGanadoresTab();
-  });
-  document.getElementById("ganadoresPeriodo").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    ganadoresPeriodo = btn.dataset.periodo; renderGanadoresTab();
-  });
-
   // ---------------- Listeners ----------------
-  document.getElementById("stockBuscar").addEventListener("input", e => { stockBuscar = e.target.value; renderStock(); });
-  document.getElementById("stockMin").addEventListener("input", e => { stockMin = e.target.value === "" ? null : Number(e.target.value); renderStock(); });
-  document.getElementById("stockMax").addEventListener("input", e => { stockMax = e.target.value === "" ? null : Number(e.target.value); renderStock(); });
-  document.getElementById("stockCategoria").addEventListener("change", e => { stockCategoria = e.target.value; renderStock(); });
-  document.getElementById("stockOcultos").addEventListener("change", e => { stockOcultos = e.target.checked; renderStock(); });
-  document.getElementById("stockOrden").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    stockOrden = btn.dataset.crit;
-    document.querySelectorAll("#stockOrden button").forEach(b => b.classList.toggle("active", b === btn));
-    renderStock();
-  });
 
-  document.getElementById("ultimasCategoria").addEventListener("change", e => { ultimasCategoria = e.target.value; renderUltimas(); });
-  document.getElementById("ultimasBuscar").addEventListener("input", e => { ultimasBuscar = e.target.value; renderUltimas(); });
-  document.getElementById("ultimasRapido").addEventListener("click", () => { ultimasRapido = true; document.getElementById("ultimasRapido").classList.add("active"); document.getElementById("ultimasTodos").classList.remove("active"); renderUltimas(); });
-  document.getElementById("ultimasTodos").addEventListener("click", () => { ultimasRapido = false; document.getElementById("ultimasTodos").classList.add("active"); document.getElementById("ultimasRapido").classList.remove("active"); renderUltimas(); });
 
-  document.getElementById("vendidosCategoria").addEventListener("change", e => { vendidosCategoria = e.target.value; renderVendidos(); });
-  document.getElementById("vendidosBuscar").addEventListener("input", e => { vendidosBuscar = e.target.value; renderVendidos(); });
-  document.getElementById("vendidosCriterio").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    vendidosCriterio = btn.dataset.crit;
-    document.querySelectorAll("#vendidosCriterio button").forEach(b => b.classList.toggle("active", b === btn));
-    renderVendidos();
-  });
-  document.getElementById("vendidosVistaSel").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    vendidosVista = btn.dataset.vista;
-    document.querySelectorAll("#vendidosVistaSel button").forEach(b => b.classList.toggle("active", b === btn));
-    renderVendidos();
-  });
 
-  document.getElementById("nuevosBuscar").addEventListener("input", e => { nuevosBuscar = e.target.value; renderNuevos(); });
 
-  document.getElementById("sinventasCategoria").addEventListener("change", e => { sinventasCategoria = e.target.value; renderSinVentas(); });
-  document.getElementById("sinventasBuscar").addEventListener("input", e => { sinventasBuscar = e.target.value; renderSinVentas(); });
-  document.getElementById("sinventasStockFiltro").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    sinventasStock = btn.dataset.crit;
-    document.querySelectorAll("#sinventasStockFiltro button").forEach(b => b.classList.toggle("active", b === btn));
-    renderSinVentas();
-  });
-  document.getElementById("sinventasOrden").addEventListener("click", e => {
-    const btn = e.target.closest("button"); if (!btn) return;
-    sinventasOrden = btn.dataset.crit;
-    document.querySelectorAll("#sinventasOrden button").forEach(b => b.classList.toggle("active", b === btn));
-    renderSinVentas();
-  });
 
   document.getElementById("btnActualizar").addEventListener("click", (e) => {
     e.target.disabled = true;
