@@ -2305,18 +2305,26 @@
         if (st <= 0) filas.push({ k: it.k, d: p.producto, w, co, ta, av, st }); }); });
     return filas.sort((a, b) => b.w - a.w || String(a.co).localeCompare(b.co));
   }
-  function stDescargarTransf(btn) {
-    const f = stTransferencias();
-    if (!f.length) { btn.textContent = "Sin transferencias para sugerir"; return; }
-    const ws = XLSX.utils.aoa_to_sheet([["Código", "Artículo", "Venta web 30 d", "Color", "Talle", "En Avellaneda", "En web"], ...f.map(x => [x.k, x.d, x.w, x.co, x.ta, x.av, x.st])]);
-    ws["!cols"] = [10, 32, 14, 22, 8, 14, 8].map(w => ({ wch: w }));
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Transferir a depósito");
-    XLSX.writeFile(wb, `Transferencias sugeridas ${new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10)}.xlsx`);
-    btn.textContent = `⇄ ${fmtNum(f.reduce((s, x) => s + x.av, 0))} prendas · ${new Set(f.map(x => x.k)).size} artículos`;
+  function renderTransf() {
+    const cont = document.getElementById("focoLista"), f = stTransferencias(), por = new Map();
+    f.forEach(x => { const g = por.get(x.k) || { k: x.k, d: x.d, w: x.w, u: 0, rows: [], p: null }; g.u += x.av; g.rows.push(x); por.set(x.k, g); });
+    (data.productos || []).forEach(p => { const it = stItem(p); if (it && por.has(it.k) && !por.get(it.k).p) por.get(it.k).p = p; });
+    const gs = [...por.values()].sort((a, b) => b.w - a.w), tot = f.reduce((s, x) => s + x.av, 0);
+    const caja = (l, v) => `<div class="rounded-lg p-3" style="background:#f1f5f9"><div class="text-xs text-slate-500">${l}</div><div class="text-xl font-bold">${v}</div></div>`;
+    cont.innerHTML = `<div class="grid grid-cols-2 gap-2 max-w-md">${caja("Prendas a traer", fmtNum(tot))}${caja("Artículos", fmtNum(gs.length))}</div>
+      <div class="text-[11px] text-slate-400">Vende ${ST_TRANSF_VENTA}+ por mes en la web, está en 0 en la web y hay ${ST_TRANSF_MIN} o más en Avellaneda · planilla del ${stockActual.fecha.split("-").reverse().slice(0, 2).join("/")}, stock web al momento.</div>
+      ${gs.length ? `<div class="card divide-y divide-slate-100">${gs.map(g => `<div class="flex gap-3 p-3 ${g.p ? "cursor-pointer hover:bg-slate-50" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>
+        ${g.p && g.p.imagen ? `<img src="${focoEsc(g.p.imagen)}" class="w-10 aspect-[3/4] object-cover rounded bg-slate-100" loading="lazy">` : `<div class="w-10 aspect-[3/4] rounded bg-slate-100"></div>`}
+        <div class="min-w-0"><div class="font-semibold text-sm">${focoEsc(g.d)} <span class="font-normal" style="color:#9B5C6B">${fmtNum(g.u)} u.</span></div>
+          <div class="text-[11px] text-slate-400">${focoEsc(g.k)} · ${fmtNum(g.w)} por mes en la web</div>
+          <div class="flex flex-wrap gap-1 mt-1.5">${g.rows.map(x => `<span class="chip" style="background:#E6F1FB;color:#0C447C">${focoEsc(x.co)} ${focoEsc(x.ta)} · ${fmtNum(x.av)}</span>`).join("")}</div></div></div>`).join("")}</div>`
+      : `<div class="card p-4 text-sm text-slate-500">No hay nada para traer del local: lo que más vende tiene stock en la web.</div>`}`;
+    document.getElementById("focoLeyenda").textContent = "";
   }
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
     localRecalc();
+    if (focoVista === "transf" && !stTieneDetalle()) focoVista = "lista";
     document.getElementById("focoPeriodo").innerHTML = FOCO_PERIODOS.map(([k, l]) => `<button class="pill ${focoPeriodo === k ? "active" : ""}" data-fp="${k}">${l}</button>`).join("");
     const esLista = focoVista === "lista";
     if (esLista && focoModo === "tn") focoModo = "grupo";
@@ -2324,11 +2332,10 @@
     const modos = esLista ? [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["ingreso", "Último ingreso"]] : FOCO_MODOS;
     const ordenes = esLista ? [["estado", "Estado"], ...FOCO_ORDENES] : FOCO_ORDENES;
     if (!esLista && focoOrden === "estado") focoOrden = "vend";
-    document.getElementById("focoModoBar").innerHTML = `<span class="w-full flex flex-wrap gap-1.5 items-center mb-1"><span class="text-xs text-slate-500 font-medium">Vista:</span>${[["lista", "☰ Lista"], ["tarjetas", "▦ Tarjetas"]].map(([k, l]) => `<button class="pill ${focoVista === k ? "active" : ""}" data-fvista="${k}">${l}</button>`).join("")}</span><span class="text-xs text-slate-500 font-medium">Ver por:</span>${modos.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
+    document.getElementById("focoModoBar").innerHTML = `<span class="w-full flex flex-wrap gap-1.5 items-center mb-1"><span class="text-xs text-slate-500 font-medium">Vista:</span>${[["lista", "☰ Lista"], ["tarjetas", "▦ Tarjetas"], ...(stTieneDetalle() ? [["transf", "⇄ Transferencias"]] : [])].map(([k, l]) => `<button class="pill ${focoVista === k ? "active" : ""}" data-fvista="${k}">${l}</button>`).join("")}</span><span class="text-xs text-slate-500 font-medium">Ver por:</span>${modos.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
       + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "")
       + (focoModo !== "tn" && focoModo !== "ingreso" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${ordenes.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "")
-      + (focoModo !== "tn" ? `<span class="w-full flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de:</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>${localBarra()}${stTieneDetalle() ? `<button class="pill" id="focoTransf" title="Color y talle en 0 en la web con ${ST_TRANSF_MIN} o más en Avellaneda, en los que venden ${ST_TRANSF_VENTA}+ por mes en la web">⇄ Transferencias sugeridas</button>` : ""}` : "");
-    const tb = document.getElementById("focoTransf"); if (tb) tb.onclick = () => stDescargarTransf(tb);
+      + (focoModo !== "tn" ? `<span class="w-full flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de:</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>${localBarra()}` : "");
     document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
     document.querySelectorAll("[data-fvista]").forEach(b => b.onclick = () => { focoVista = b.dataset.fvista; db.ref("dashboard_foco/vista").set(focoVista); renderFoco(); });
     document.querySelectorAll("[data-forden]").forEach(b => b.onclick = () => { focoOrden = b.dataset.forden; db.ref("dashboard_foco/orden").set(focoOrden); renderFoco(); });
@@ -2339,6 +2346,7 @@
     document.getElementById("focoLeyenda").textContent = focoModo === "tn"
       ? "En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer)."
       : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido (web, local o las dos, según "Ventas de"). Reponer mira solo la web: se vende online y queda poco cargado. El local se lleva al período como promedio diario del reporte cargado. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
+    if (focoVista === "transf") { document.getElementById("focoCats").style.display = "none"; renderTransf(); return; }
     if (focoModo !== "tn") {
       document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
       if (esLista) { document.getElementById("focoLeyenda").textContent = `Estados — Reponer: vende, le queda menos de 5 semanas de stock en remeras y tops o 4 en el resto, y no tiene corte en curso. Destrabar: igual que Reponer o sin stock, pero ya hay un corte en la fábrica: hay que acelerarlo, no cortar otro. OK: desde ese límite hasta ${FL_EMPUJAR} días. Empujar: ${FL_EMPUJAR} a ${FL_CLAVADO} días. Clavado: más de ${FL_CLAVADO} días o sin ventas en el período. Nuevo: ingresó hace ${CL_NEWIN_DIAS} días o menos (no se marca Empujar ni Clavado). Reingreso: igual que Nuevo, pero de un producto que ya estaba en la web (volvió a entrar mercadería). Días de stock = stock (Nina + Avellaneda; lo que no está en la planilla cuenta 0 en Avellaneda) ÷ venta diaria del período (web, local o las dos según "Ventas de"). Solo aparecen los artículos clasificados y no rechazados. Último ingreso: cierre del control en Logística de Fábrica (cortes y prendas de proveedor), cruzado por código con el inicio del SKU; si no hay, la fecha de alta en Tienda Nube. ⭐ = top ${CL_TOP} más vendidos de 30 días.`; renderFocoLista(); return; }
