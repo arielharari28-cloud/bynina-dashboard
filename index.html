@@ -368,7 +368,10 @@
   const CORTE_ETAPAS = [["-OyK-CY2ge_5HrNA29GC", "mejora"], ["-OyJYMpvmJ3HFJv7LLk6", "revisión final"], ["fabrica_taller_terminacion", "en terminación"], ["fabrica_estampado_taller", "en estampa"], ["s6", "en taller"], ["s5", "en taller"], ["sLT", "por sacar a taller"], ["s4", "listo para taller"], ["s3", "por cortar"], ["-OyJXEFSAun4hYqJ3RDM", "pendiente tizada"]];
   // Nov 2026: además del texto para Foco, guarda cada corte con su etapa, días en la etapa y lo cortado por color
   // (capas × curva, todos los colores con la misma curva), para "Para cortar" en Reposición. Se escucha en vivo.
-  let cortesCurso = new Map(), fabSec = null, fabGrupos = {};
+  let cortesCurso = new Map(), fabSec = null, fabGrupos = {}, colAlias = {};
+  // Equivalencias de colores fábrica → Ninox (dashboard_colores_alias/{color fábrica}): {fab, ninox}. ninox "" = color nuevo, no está en Ninox.
+  const colAliasKey = c => lcKey(lcNorm(c) || "_");
+  const colFabNorm = c => { const a = colAlias[colAliasKey(c)]; return a && a.ninox ? lcNorm(a.ninox) : lcNorm(c); };
   const fabCk = n => String(n == null ? "" : n).trim().replace(/[.#$\[\]\/]/g, "_");
   function cortesCursoRecalc() {
     if (!fabSec) return;
@@ -379,7 +382,7 @@
       const tal = x.capas_talles || [], cv = x.curva_valores || {}, sumCurva = tal.reduce((s, t) => s + (parseFloat(cv[t]) || 0), 0);
       const g = num ? (fabGrupos[fabCk(x.numero_corte)] || {}) : {}, rollos = Object.values(g.rollos || x.rollos || {}).filter(r => r && r.color && r.capas);
       let porColor = null;
-      if (sumCurva > 0 && rollos.length) { porColor = new Map(); rollos.forEach(r => { const kk = lcNorm(r.color), o = porColor.get(kk) || { co: r.color, u: 0 }; o.u += Math.round((parseFloat(r.capas) || 0) * sumCurva); porColor.set(kk, o); }); }
+      if (sumCurva > 0 && rollos.length) { porColor = new Map(); rollos.forEach(r => { const kk = colFabNorm(r.color), o = porColor.get(kk) || { co: r.color, u: 0 }; o.u += Math.round((parseFloat(r.capas) || 0) * sumCurva); porColor.set(kk, o); }); }
       const ts = x.fecha_etapa || x.fecha_ingreso || 0;
       const cc = { num, etapa, dias: ts ? Math.max(0, Math.floor((Date.now() - ts) / 864e5)) : null, porColor, dash: !!x.origen_reposicion };
       if (e) { e.n++; e.cortes.push(cc); } else m.set(c, { t: `${num ? "Corte " + num : "Sin N° de corte"} · ${etapa}`, n: 1, cortes: [cc] }); }); });
@@ -387,6 +390,7 @@
   }
   db.ref("fabrica_v5/sections").on("value", snap => { fabSec = snap.val() || {}; cortesCursoRecalc(); }, () => {});
   db.ref("fabrica_v5/grupos_corte").on("value", snap => { fabGrupos = snap.val() || {}; cortesCursoRecalc(); }, () => {});
+  db.ref("dashboard_colores_alias").on("value", snap => { colAlias = snap.val() || {}; cortesCursoRecalc(); }, () => {});
   const flCorte = p => { const e = cortesCurso.get(stNorm(stCodigo(p))); return !e ? "" : e.n > 1 ? `${e.t} (+${e.n - 1} más)` : e.t; };
   // Días de stock debajo de los cuales hay que reponer: 5 semanas en remeras y tops, 4 en el resto.
   const flDiasReponer = p => /^(remera|top)/i.test(flCat(p)) ? 35 : 28;
@@ -1587,9 +1591,19 @@
             if (!cort.size) det = `<div class="text-sm text-slate-500 mt-2">Faltaban ≈ ${fmtNum(g.u)}. Todavía sin cortar: no se resta, solo queda acá para no pedirlo dos veces.</div>`;
             else { const filas = [...falta.entries()].map(([kk, v]) => { const cu = (cort.get(kk) || {}).u || 0, d = Math.round(v.u - cu);
                 return `<tr><td class="pr-3 py-0.5 whitespace-nowrap">${focoEsc(v.co)}</td><td class="px-2 text-center">${fmtNum(Math.round(v.u))}</td><td class="px-2 text-center">${fmtNum(cu)}</td><td class="pl-3">${d > 0 ? `<span style="color:#791F1F">faltan ≈ ${fmtNum(d)}</span>` : `<span style="color:#27500A">cubre</span>`}</td></tr>`; }).join("");
-              const extra = [...cort.entries()].filter(([kk]) => !falta.has(kk)).map(([, v]) => `${focoEsc(v.co)} ${fmtNum(v.u)}`);
+              // Colores cortados que no están en lo que faltaba: si existen en Ninox para el artículo (o se marcaron como nuevos) es "también se cortó";
+              // si no, es un nombre que no cruza y se empareja una sola vez con un color de Ninox.
+              const stIt = (stockActual && stockActual.items || []).find(i => i && stNorm(i.k) === stNorm(g.k)), colsNinox = new Map();
+              ((stIt && stIt.v) || []).forEach(v => colsNinox.set(lcNorm(v[0]), v[0])); g.rows.forEach(x => colsNinox.set(lcNorm(x.co), x.co));
+              const extra = [], noCruza = [];
+              [...cort.entries()].filter(([kk]) => !falta.has(kk)).forEach(([kk, v]) => { const al = colAlias[colAliasKey(v.co)];
+                if (colsNinox.has(kk) || (al && al.ninox === "")) extra.push(`${focoEsc(v.co)} ${fmtNum(v.u)}${al && al.ninox === "" ? " (nuevo)" : ""}`); else noCruza.push(v); });
+              const opts = [...colsNinox.values()].sort((a, b) => a.localeCompare(b));
+              const cruce = noCruza.map(v => `<div class="mt-2 rounded-lg px-3 py-2 text-sm" style="background:#FAEEDA;color:#633806"><b>${focoEsc(v.co)}</b> (fábrica, ${fmtNum(v.u)} cortadas) no cruza con ningún color de Ninox. Es:
+                <div class="flex flex-wrap items-center gap-2 mt-1"><select data-colsel="${focoEsc(v.co)}" class="border border-slate-300 rounded-lg px-2 py-1 text-sm" style="background:#fff;color:#191919"><option value="">Elegir color de Ninox…</option>${opts.map(o => `<option value="${focoEsc(o)}">${focoEsc(o)}</option>`).join("")}<option value="__nuevo__">Es un color nuevo (no está en Ninox)</option></select>
+                <button class="pill" style="background:#416096;color:#fff;border-color:#416096" data-colok="${focoEsc(v.co)}">Guardar</button></div></div>`).join("");
               det = `<table class="text-sm mt-2"><thead><tr class="text-slate-400"><th></th><th class="px-2 font-normal">faltaba</th><th class="px-2 font-normal">cortado</th><th></th></tr></thead><tbody>${filas}</tbody></table>
-                ${extra.length ? `<div class="text-xs text-slate-500 mt-1">También se cortó: ${extra.join(" · ")}</div>` : ""}<div class="text-xs text-slate-400 mt-1">Cortado = capas × curva de la tiza.</div>`; }
+                ${extra.length ? `<div class="text-xs text-slate-500 mt-1">También se cortó: ${extra.join(" · ")}</div>` : ""}${cruce}<div class="text-xs text-slate-400 mt-1">Cortado = capas × curva de la tiza.</div>`; }
             if (cs.some(c => c.dash)) det += `<div class="text-xs text-slate-400 mt-1">Pedido desde el Dashboard.</div>`;
           } else {
             cab = `<span class="chip" style="background:#F1EFE8;color:#444441;font-size:12px">Marcado a mano · ${e.dias ? "hace " + e.dias + " día" + (e.dias > 1 ? "s" : "") : "hoy"}</span>`;
@@ -1619,6 +1633,9 @@
       try { await trMandarFabrica(g); trAbierto = null; renderTransf(); } catch (err) { b.disabled = false; b.textContent = "Confirmar"; alert("No se pudo mandar a Fábrica: " + err.message); } });
     cont.querySelectorAll("[data-trrenovar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_encurso/" + b.dataset.trrenovar + "/ts").set(Date.now()); });
     cont.querySelectorAll("[data-trquitar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_encurso/" + b.dataset.trquitar).remove(); });
+    cont.querySelectorAll("[data-colok]").forEach(b => b.onclick = e => { e.stopPropagation(); const fab = b.dataset.colok, sel = [...cont.querySelectorAll("[data-colsel]")].find(x => x.dataset.colsel === fab);
+      if (!sel || !sel.value) { alert("Elegí a qué color de Ninox corresponde."); return; }
+      db.ref("dashboard_colores_alias/" + colAliasKey(fab)).set({ fab, ninox: sel.value === "__nuevo__" ? "" : sel.value, ts: Date.now() }); });
   }
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
