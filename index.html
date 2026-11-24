@@ -1542,7 +1542,10 @@
       const totCol = c => g.rows.filter(x => x.co === c).reduce((s, x) => s + x.q, 0);
       return `<table class="mt-2" style="font-size:14px;border-collapse:separate;border-spacing:4px 3px"><thead><tr><th></th>${tas.map(t => `<th class="text-slate-400 font-normal" style="min-width:44px">${focoEsc(t)}</th>`).join("")}</tr></thead><tbody>${cols.sort((a, b) => totCol(b) - totCol(a)).map(c => `<tr><td class="pr-3 whitespace-nowrap">${focoEsc(c)}</td>${tas.map(t => { const x = q.get(c + "|" + t); return `<td class="text-center">${x ? `<span class="inline-block rounded" style="background:${bg};color:${fg};min-width:40px;padding:2px 0;font-weight:500" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${fmtNum(x.q)}</span>` : ""}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`; };
     const tarjetas = inner => `<div class="grid gap-3 p-3" style="grid-template-columns:repeat(auto-fill,minmax(380px,1fr))">${inner}</div>`;
-    const llevarFilas = r.llevar, cortarTodas = r.falta.filter(x => !trNoCortar[x.key]), descartadas = new Map();
+    // Liquidación (se marca en Clasificar) también saca el artículo de Para cortar.
+    const trLiq = x => { const a = fmArt[fmK(x.p ? (stCodigo(x.p) || x.k) : x.k)]; return !!(a && a.liq); };
+    const liqArts = new Map(); r.falta.filter(x => !trNoCortar[x.key] && trLiq(x)).forEach(x => liqArts.set(fmK(x.p ? (stCodigo(x.p) || x.k) : x.k), x.d));
+    const llevarFilas = r.llevar, cortarTodas = r.falta.filter(x => !trNoCortar[x.key] && !trLiq(x)), descartadas = new Map();
     const est = new Map(); cortarTodas.forEach(x => { if (!est.has(x.key)) est.set(x.key, trEstadoCorte(x.k, x.key)); });
     const cortarFilas = cortarTodas.filter(x => /libre|vencida/.test(est.get(x.key).tipo)), enCursoFilas = cortarTodas.filter(x => /app|manual/.test(est.get(x.key).tipo));
     // Marca manual que ya no hace falta: la app de fábrica tiene el corte.
@@ -1614,6 +1617,7 @@
             <div class="flex flex-wrap justify-end gap-1">${cab}</div></div>${det}</div>`; };
         h += `<details class="card" open><summary class="flex justify-between items-center gap-2 px-4 py-3 cursor-pointer" style="font-size:16px"><span class="font-semibold">Ya en fábrica · no cortar otro</span><span style="color:#9B5C6B;font-size:14px">${fmtNum(enArts.length)} artículos</span></summary><div class="border-t border-slate-100">${tarjetas(enArts.map(tarjEn).join(""))}</div></details>`;
       }
+      if (liqArts.size) h += `<div class="card p-4"><div class="font-semibold text-sm mb-2">En liquidación · no se cortan · ${liqArts.size}</div><div class="flex flex-wrap gap-2">${[...liqArts].map(([k, d]) => `<span class="chip" style="background:#F6EDEF;color:#9B5C6B;font-size:13px">${focoEsc(d || k)} <button class="underline ml-1" data-sacarliq="${focoEsc(k)}">sacar de liquidación</button></span>`).join("")}</div></div>`;
       const desc = Object.entries(trNoCortar);
       if (desc.length) h += `<div class="card p-4"><div class="font-semibold text-sm mb-2">No cortar más · ${desc.length}</div><div class="flex flex-wrap gap-2">${desc.map(([k, v]) => `<span class="chip" style="background:#F1EFE8;color:#444441;font-size:13px">${focoEsc((v && v.d) || k)} <button class="underline ml-1" data-sicortar="${focoEsc(k)}">volver a activar</button></span>`).join("")}</div></div>`;
     }
@@ -1622,6 +1626,7 @@
     const bn = cont.querySelector("#trNinox"); if (bn) bn.onclick = () => trHojaNinox(agrupar(llevarFilas), grillaRep, fl(stockActual.fecha));
     cont.querySelectorAll("[data-nocortar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_nocortar/" + b.dataset.nocortar).set({ d: b.dataset.nocd, ts: Date.now() }); });
     cont.querySelectorAll("[data-sicortar]").forEach(b => b.onclick = () => db.ref("dashboard_nocortar/" + b.dataset.sicortar).remove());
+    cont.querySelectorAll("[data-sacarliq]").forEach(b => b.onclick = () => db.ref("dashboard_familias/art/" + b.dataset.sacarliq + "/liq").remove());
     const artDe = key => { const rows = cortarFilas.filter(x => x.key === key); if (!rows.length) return null; const f = rows[0]; return { k: f.k, key, d: f.d, p: f.p, rows, u: rows.reduce((s, x) => s + x.q, 0) }; };
     cont.querySelectorAll("[data-trabrir]").forEach(b => b.onclick = e => { e.stopPropagation(); trAbierto = { key: b.dataset.trk, modo: b.dataset.trabrir }; renderTransf(); });
     cont.querySelectorAll("[data-trcerrar]").forEach(b => b.onclick = e => { e.stopPropagation(); trAbierto = null; renderTransf(); });
