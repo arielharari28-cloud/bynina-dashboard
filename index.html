@@ -2069,32 +2069,70 @@
   function focoGuardar() { db.ref("dashboard_foco").update({ categorias: focoCats, periodo: focoPeriodo }); }
   const focoEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const FOCO_MODOS = [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["tn", "Tienda Nube (anterior)"]];
-  // Transferencias sugeridas: en los que venden 30+ por mes en la web, los color/talle en 0 en la web con 3 o más en Avellaneda.
-  const ST_TRANSF_VENTA = 30, ST_TRANSF_MIN = 3;
+  // Transferencias (reglas de Ariel, nov 2026), por color y talle:
+  //  - El local tiene que tener como máximo 2 semanas de su venta.
+  //  - Fábrica (= web) tiene que guardar 2 semanas de web + 2 semanas de local.
+  //  - Llevar al local: le falta para sus 2 semanas y a fábrica le sobra por encima de lo que guarda.
+  //  - Traer a fábrica: el local tiene más de sus 2 semanas y a fábrica le falta.
+  //  - Falta en los dos: aunque se mueva, no alcanza → hay que cortar. Movimientos de 1 prenda no se muestran.
+  const TR_DIAS = 14, TR_MIN = 2;
   const stTieneDetalle = () => !!(stockActual && (stockActual.items || []).some(i => i && i.v));
+  function trVentaLocal() {
+    // Ventas del local por código → "color|talle" → unidades, llevadas a 14 días con las cargas más recientes.
+    const cs = lcListaCargas().filter(c => c.id !== "legacy" && (c.items || []).some(i => i.v && i.v.length));
+    if (!cs.length) return null;
+    const fin = cs[0].hasta, ini = new Date(new Date(fin) - (TR_DIAS - 1) * 86400000).toISOString().slice(0, 10), us = [];
+    cs.forEach(c => { if (c.hasta >= ini && !us.some(u => !(c.hasta < u.desde || c.desde > u.hasta))) us.push(c); });
+    const dias = us.reduce((x, c) => x + lcDiasRango(c.desde, c.hasta), 0) || TR_DIAS, f = TR_DIAS / dias, m = new Map();
+    us.forEach(c => (c.items || []).forEach(it => { const k = stNorm(it.k), e = m.get(k) || new Map();
+      (it.v || []).forEach(([cv, u]) => { const [co, ta] = String(cv).split("|"), kk = lcNorm(co) + "|" + lcNorm(ta); e.set(kk, (e.get(kk) || 0) + (u || 0) * f); }); m.set(k, e); }));
+    return { m, desde: us.map(c => c.desde).sort()[0], hasta: fin };
+  }
   function stTransferencias() {
-    const filas = [];
-    (data.productos || []).forEach(p => { const it = stItem(p), w = clVend(p, "30dias"); if (!it || !it.v || w < ST_TRANSF_VENTA) return;
-      it.v.forEach(([co, ta, , av]) => { if ((av || 0) < ST_TRANSF_MIN) return;
-        const v = (p.variantes || []).find(x => lcNorm(x.color || "Único") === lcNorm(co) && lcNorm(x.talle || "Único") === lcNorm(ta)), st = v ? v.stock || 0 : 0;
-        if (st <= 0) filas.push({ k: it.k, d: p.producto, w, co, ta, av, st }); }); });
-    return filas.sort((a, b) => b.w - a.w || String(a.co).localeCompare(b.co));
+    const lv = trVentaLocal(), r = { llevar: [], traer: [], falta: [], lv };
+    if (!lv) return r;
+    const porCod = new Map(); (data.productos || []).forEach(p => { const it = stItem(p); if (it && !porCod.has(stNorm(it.k))) porCod.set(stNorm(it.k), p); });
+    (stockActual.items || []).forEach(it => { if (!it || !it.v) return;
+      const k = stNorm(it.k), p = porCod.get(k), loc = lv.m.get(k) || new Map(), combos = new Map();
+      it.v.forEach(([co, ta, n, a]) => combos.set(lcNorm(co) + "|" + lcNorm(ta), { co, ta, n: n || 0, a: a || 0 }));
+      loc.forEach((u, kk) => { if (!combos.has(kk)) { const [co, ta] = kk.split("|"); combos.set(kk, { co, ta, n: 0, a: 0 }); } });
+      const web = new Map(); if (p) { const vv = ((p.ventasPorPeriodo || {})["15dias"] || {}).variantesVendidas || [];
+        vv.forEach(v => web.set(lcNorm(v.color || "Único") + "|" + lcNorm(v.talle || "Único"), (v.unidades || 0) * TR_DIAS / 15)); }
+      combos.forEach((c, kk) => {
+        // Fábrica: stock de Tienda Nube al momento si el producto está cruzado; si no, la planilla.
+        if (p) { const v = (p.variantes || []).find(x => lcNorm(x.color || "Único") + "|" + lcNorm(x.talle || "Único") === kk); if (v) c.n = v.stock || 0; }
+        const L = Math.round(loc.get(kk) || 0), W = Math.round(web.get(kk) || 0), guarda = W + L;
+        if (!L && !W) return;
+        let n = c.n, a = c.a;
+        const fila = q => ({ k: it.k, d: p ? p.producto : it.d, p, co: c.co, ta: c.ta, q, L, W, n: c.n, a: c.a });
+        const qLl = Math.min(L - a, n - guarda); if (qLl >= TR_MIN) { r.llevar.push(fila(qLl)); n -= qLl; a += qLl; }
+        const qTr = Math.min(a - L, guarda - n); if (qTr >= TR_MIN) { r.traer.push(fila(qTr)); n += qTr; a -= qTr; }
+        const fal = Math.max(0, L - a) + Math.max(0, guarda - n); if (fal >= TR_MIN) r.falta.push(fila(fal));
+      });
+    });
+    return r;
   }
   function renderTransf() {
-    const cont = document.getElementById("focoLista"), f = stTransferencias(), por = new Map();
-    f.forEach(x => { const g = por.get(x.k) || { k: x.k, d: x.d, w: x.w, u: 0, rows: [], p: null }; g.u += x.av; g.rows.push(x); por.set(x.k, g); });
-    (data.productos || []).forEach(p => { const it = stItem(p); if (it && por.has(it.k) && !por.get(it.k).p) por.get(it.k).p = p; });
-    const gs = [...por.values()].sort((a, b) => b.w - a.w), tot = f.reduce((s, x) => s + x.av, 0);
-    const caja = (l, v) => `<div class="rounded-lg p-3" style="background:#f1f5f9"><div class="text-xs text-slate-500">${l}</div><div class="text-xl font-bold">${v}</div></div>`;
-    cont.innerHTML = `<div class="grid grid-cols-2 gap-2 max-w-md">${caja("Prendas a traer", fmtNum(tot))}${caja("Artículos", fmtNum(gs.length))}</div>
-      <div class="text-[11px] text-slate-400">Vende ${ST_TRANSF_VENTA}+ por mes en la web, está en 0 en la web y hay ${ST_TRANSF_MIN} o más en Avellaneda · planilla del ${stockActual.fecha.split("-").reverse().slice(0, 2).join("/")}, stock web al momento.</div>
-      ${gs.length ? `<div class="card divide-y divide-slate-100">${gs.map(g => `<div class="flex gap-3 p-3 ${g.p ? "cursor-pointer hover:bg-slate-50" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>
-        ${g.p && g.p.imagen ? `<img src="${focoEsc(g.p.imagen)}" class="w-10 aspect-[3/4] object-cover rounded bg-slate-100" loading="lazy">` : `<div class="w-10 aspect-[3/4] rounded bg-slate-100"></div>`}
-        <div class="min-w-0"><div class="font-semibold text-sm">${focoEsc(g.d)} <span class="font-normal" style="color:#9B5C6B">${fmtNum(g.u)} u.</span></div>
-          <div class="text-[11px] text-slate-400">${focoEsc(g.k)} · ${fmtNum(g.w)} por mes en la web</div>
-          <div class="flex flex-wrap gap-1 mt-1.5">${g.rows.map(x => `<span class="chip" style="background:#E6F1FB;color:#0C447C">${focoEsc(x.co)} ${focoEsc(x.ta)} · ${fmtNum(x.av)}</span>`).join("")}</div></div></div>`).join("")}</div>`
-      : `<div class="card p-4 text-sm text-slate-500">No hay nada para traer del local: lo que más vende tiene stock en la web.</div>`}`;
+    const cont = document.getElementById("focoLista"), r = stTransferencias();
     document.getElementById("focoLeyenda").textContent = "";
+    if (!r.lv) { cont.innerHTML = `<div class="card p-4 text-sm text-slate-500">Para calcular las transferencias hace falta una carga de ventas del local con color y talle (Ranking de artículos).</div>`; return; }
+    const fl = x => x.split("-").reverse().slice(0, 2).join("/");
+    const bloque = (titulo, sub, filas, bg, fg) => {
+      const por = new Map(); filas.forEach(x => { const g = por.get(x.k) || { k: x.k, d: x.d, p: x.p, u: 0, rows: [] }; g.u += x.q; g.rows.push(x); por.set(x.k, g); });
+      const gs = [...por.values()].sort((a, b) => b.u - a.u);
+      return `<div class="space-y-2"><div class="flex items-baseline justify-between gap-2"><div class="font-bold text-sm">${titulo}</div><div class="text-xs" style="color:#9B5C6B">${fmtNum(filas.reduce((s, x) => s + x.q, 0))} prendas · ${fmtNum(gs.length)} artículos</div></div>
+        <div class="text-[11px] text-slate-400">${sub}</div>
+        ${gs.length ? `<div class="card divide-y divide-slate-100">${gs.map(g => `<div class="flex gap-3 p-3 ${g.p ? "cursor-pointer hover:bg-slate-50" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>
+          ${g.p && g.p.imagen ? `<img src="${focoEsc(g.p.imagen)}" class="w-10 aspect-[3/4] object-cover rounded bg-slate-100" loading="lazy">` : `<div class="w-10 aspect-[3/4] rounded bg-slate-100"></div>`}
+          <div class="min-w-0"><div class="font-semibold text-sm">${focoEsc(g.d)} <span class="font-normal" style="color:#9B5C6B">${fmtNum(g.u)} u.</span></div>
+            <div class="text-[11px] text-slate-400">${focoEsc(g.k)}</div>
+            <div class="flex flex-wrap gap-1 mt-1.5">${g.rows.map(x => `<span class="chip" style="background:${bg};color:${fg}" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${focoEsc(x.co)} ${focoEsc(x.ta)} · ${fmtNum(x.q)}</span>`).join("")}</div></div></div>`).join("")}</div>`
+          : `<div class="card p-3 text-xs text-slate-400">Nada por ahora.</div>`}</div>`;
+    };
+    cont.innerHTML = `<div class="text-[11px] text-slate-400">Venta de 2 semanas: local del ${fl(r.lv.desde)} al ${fl(r.lv.hasta)} y web de los últimos 15 días · stock: fábrica al momento (Tienda Nube), Avellaneda de la planilla del ${fl(stockActual.fecha)}. El local tiene que tener 2 semanas de su venta; fábrica guarda 2 semanas de web + 2 de local.</div>
+      ${bloque("Llevar al local", "Al local le falta para sus 2 semanas y a fábrica le sobra.", r.llevar, "#E6F1FB", "#0C447C")}
+      ${bloque("Traer a fábrica", "El local tiene más de sus 2 semanas y a fábrica le falta.", r.traer, "#EAF3DE", "#27500A")}
+      ${bloque("Falta en los dos · hay que cortar", "Aunque se mueva, no alcanza para las 2 semanas de cada lado. El número es lo que falta.", r.falta, "#FCEBEB", "#A32D2D")}`;
   }
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
