@@ -146,15 +146,9 @@
 
     <div class="view" data-view="clasificar">
       <h1 class="text-xl md:text-2xl font-bold text-slate-900 flex items-center gap-2">🏷️ Clasificar mercadería</h1>
-      <div class="flex flex-wrap gap-2 items-center mt-2 mb-3"><button class="pill active" data-fmvista="familias">Familias</button><button class="pill" data-fmvista="anterior">Clasificación anterior</button></div>
       <div id="famBox">
-        <p class="text-sm text-slate-500 mb-4">Cada artículo va en una sola familia, armada por código: base + letra de tela (el número de estampa no cuenta). Los casos que no siguen la regla los movés a mano. Las líneas son etiquetas: un artículo puede tener varias. Solo entran las temporadas que están en la planilla de stock.</p>
+        <p class="text-sm text-slate-500 mb-4">Cada artículo va en una sola familia, armada por código: base + letra de tela (el número de estampa no cuenta). Los casos que no siguen la regla los movés a mano. Las líneas son etiquetas: un artículo puede tener varias, y son las tendencias que usa el Foco. El grupo sale solo: New In los primeros 30 días, Básicos si tiene esa línea, Sale si lo marcás en Liquidación, y si no Colección. Este es el único lugar donde se clasifica. Solo entran las temporadas que están en la planilla de stock.</p>
         <div id="famLista"></div>
-      </div>
-      <div id="clasifViejo" style="display:none">
-      <p class="text-sm text-slate-500 mt-1 mb-4">Clasificación anterior (categoría, grupo y tendencias). Queda guardada y el Foco la sigue usando hasta que pasemos el Foco a familias.</p>
-      <div class="flex flex-wrap gap-2 items-center mb-4"><div id="clasifTabs" class="flex flex-wrap gap-1.5"></div><input id="clasifBusca" type="text" placeholder="Buscar producto…" class="border border-slate-200 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[180px]" /></div>
-      <div id="clasifLista" class="space-y-3"></div>
       </div>
     </div>
 
@@ -301,13 +295,14 @@
   const clNorm = t => String(t || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
   const clEsGrupo = t => CL_GRUPOS.some(g => clNorm(g) === clNorm(t));
   const CL_BASES_DEF = ["Remera", "Top", "Body", "Buzo", "Campera", "Pantalón", "Short", "Jean", "Pollera", "Vestido", "Conjunto"];
+  let clCargado = false, clCfgViejo = { bases: CL_BASES_DEF, tendencias: [] };
   let clItems = {}, clCfg = { bases: CL_BASES_DEF, tendencias: [] }, clTab = "asignar", clDraft = {}, clBusca = "";
   let focoModo = "grupo", focoOcultarSin = false; const focoBaseFiltro = {};
-  db.ref("dashboard_clasif/items").on("value", s => { clItems = s.val() || {}; if (data) { renderClasif(); renderFoco(); try { renderClasifDash(); } catch (e) {} if (pmId != null) pmRender(); } });
+  db.ref("dashboard_clasif/items").on("value", s => { clItems = s.val() || {}; clCargado = true; if (data) renderFam(); });
   db.ref("dashboard_clasif/cfg").on("value", s => { const v = s.val() || {}; const tend = v.tendencias || [];
     const dup = tend.filter(clEsGrupo);
     if (dup.length) clLimpiarTendGrupo(dup, tend.filter(t => !clEsGrupo(t)));
-    clCfg = { bases: (v.bases && v.bases.length) ? v.bases : CL_BASES_DEF, tendencias: tend.filter(t => !clEsGrupo(t)) }; if (data) { renderClasif(); renderFoco(); } });
+    clCfgViejo = { bases: (v.bases && v.bases.length) ? v.bases : CL_BASES_DEF, tendencias: tend.filter(t => !clEsGrupo(t)) }; fmSyncCfg(); if (data) renderFoco(); });
   // Una tendencia con el mismo nombre que un grupo (ej. "Basicos" vs "Básicos") se pasa al grupo:
   // los productos que la tenían y no tenían grupo quedan en ese grupo; después se borra la tendencia.
   let clLimpiando = false;
@@ -327,7 +322,17 @@
   db.ref("dashboard_foco/modo").on("value", s => { if (s.val()) focoModo = s.val(); if (data) renderFoco(); });
   db.ref("dashboard_foco/ocultarSinStock").on("value", s => { focoOcultarSin = !!s.val(); if (data) renderFoco(); });
   const clVend = (p, per) => (p.ventasPorPeriodo && p.ventasPorPeriodo[per || focoPeriodo] && p.ventasPorPeriodo[per || focoPeriodo].unidades) || 0;
-  const clDe = p => clItems[p.id] || null;
+  // Nov 2026: una sola clasificación. Todo sale de Clasificar (dashboard_familias); clDe arma el
+  // objeto con la forma de antes {base, grupo, tendencias, rechazado} para que Foco, Tablero,
+  // Reposición y la ficha lean lo mismo. dashboard_clasif queda solo como origen de la migración.
+  //  - base = categoría del artículo; tendencias = sus líneas
+  //  - grupo automático: Sale si está en Liquidación, New In los primeros días desde el alta,
+  //    Básicos si tiene la línea Básicos, si no Colección
+  const clDeViejo = p => clItems[p.id] || null;
+  const clDe = p => { const a = fmArt[fmK(stCodigo(p) || "")] || {}, cat = fmCatDe(p), li = fmLineasDe(p, cat), t = {};
+    li.forEach(x => t[clKey(x)] = true);
+    const grupo = a.liq ? "Sale" : fmEsNuevo(p) ? "New In" : li.includes("Básicos") ? "Básicos" : "Colección";
+    return { base: cat, grupo, tendencias: t, rechazado: !!a.rech }; };
   // Grupo que vale hoy: New In con más de CL_NEWIN_DIAS días cuenta como Colección.
   function clGrupo(p, g) { if (g === undefined) g = (clDe(p) || {}).grupo || "";
     if (g === "New In") { const d = clDias(p.creado); if (d != null && d > CL_NEWIN_DIAS) return "Colección"; }
@@ -807,87 +812,7 @@
       ${reponer.length ? `<div style="color:#b91c1c">↻ Reponer: ${todos && colores.length > 1 ? "todos" : reponer.slice(0, 3).map(focoEsc).join(", ") + (reponer.length > 3 ? ` <span class="text-slate-500">y ${reponer.length - 3} más</span>` : "")}</div>` : ""}</div>`;
   }
 
-  // Estado guardado de un producto, en el mismo formato que el borrador (para saber si hay cambios sin guardar).
-  const clGuardado = p => { const c = clDe(p) || {}; return { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: clTendDe(p).filter(t => !clEsGrupo(t)) }; };
-  const clMismo = (a, b) => a.base === b.base && a.grupo === b.grupo && [...a.tendencias].sort().join("|") === [...b.tendencias].sort().join("|");
-  const clGuardando = {};
-  // Hay que mostrar Guardar si: nunca se guardó, está rechazado, venía de "Más vendidos" o el borrador cambió.
-  function clPendiente(p) { const c = clDe(p) || {}; return !c.base || c.rechazado || clEraMasVend(p) || !clMismo(clDraft[p.id] || clGuardado(p), clGuardado(p)); }
-  function clCard(p) {
-    const c = clDe(p) || {}, d = clDraft[p.id] || (clDraft[p.id] = clGuardado(p));
-    const pendiente = clPendiente(p), yaGuardado = !!c.base && !c.rechazado && !clEraMasVend(p), guardando = !!clGuardando[p.id];
-    const estado = guardando ? '<span class="chip" style="background:#eef2ff;color:#4338ca">Guardando…</span>'
-      : !pendiente ? '<span class="chip" style="background:#EAF3DE;color:#27500A">✓ Guardado</span>'
-      : yaGuardado ? '<span class="chip" style="background:#FAEEDA;color:#633806">Cambios sin guardar</span>' : "";
-    const dias = clDias(p.creado), rank = clTopVentas().findIndex(x => x.id === p.id) + 1, ds = clDiasStock(p);
-    const chip = (on, attrs, txt, extra = "") => `<button class="pill ${on ? "active" : ""}" ${attrs} style="${extra}">${focoEsc(txt)}</button>`;
-    return `<div class="card p-3" style="display:grid;grid-template-columns:88px 1fr;gap:12px;${yaGuardado && pendiente && !guardando ? "border-color:#f59e0b" : ""}">
-      <img src="${p.imagen || ""}" class="w-full aspect-[3/4] object-cover rounded-lg bg-slate-100" onerror="this.style.visibility='hidden'" />
-      <div class="min-w-0">
-        <div class="flex justify-between gap-2 flex-wrap items-start">
-          <div class="min-w-0"><span class="font-bold text-sm">${focoEsc(p.producto)}</span>
-            ${dias != null && dias <= 14 ? `<span class="chip chip-green ml-1">Nuevo · ${dias === 0 ? "hoy" : "hace " + dias + " d"}</span>` : ""}
-            ${(p.stockTotal || 0) <= 0 ? '<span class="chip chip-low ml-1">Sin stock</span>' : ""}
-            ${estado ? `<span class="ml-1">${estado}</span>` : ""}</div>
-          <span class="text-xs text-slate-500">${fmtNum(p.stockTotal || 0)} u. · ${fmtNum(clVend(p, "30dias"))} vend. (30 d)</span>
-        </div>
-        ${rank || (ds != null && ds <= 7 && clVend(p, "30dias") >= 5) || clEraMasVend(p) ? `<div class="flex flex-wrap gap-1.5 mt-1.5">
-          ${rank ? `<span class="chip" style="background:#FAEEDA;color:#633806">⭐ Más vendido · #${rank} en 30 d</span>` : ""}
-          ${ds != null && ds <= 7 && clVend(p, "30dias") >= 5 && (p.stockTotal || 0) > 0 ? `<span class="chip" style="background:#FCEBEB;color:#791F1F">Reponer · ${ds < 1 ? "menos de 1 día" : "~" + Math.floor(ds) + " día" + (Math.floor(ds) > 1 ? "s" : "")} de stock</span>` : ""}
-          ${clEraMasVend(p) ? '<span class="chip" style="background:#fef3c7;color:#92400e">Estaba en Más vendidos · elegí grupo</span>' : ""}
-        </div>` : ""}
-        <div class="flex flex-wrap gap-1.5 items-center mt-2"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(d.base === b, `data-clb="${p.id}" data-v="${focoEsc(b)}"`, b)).join("")}<button class="pill" data-clnb="${p.id}" style="border-style:dashed">+ Nueva categoría</button></div>
-        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo (uno)</span>${CL_GRUPOS.map(g => chip(d.grupo === g, `data-clg="${p.id}" data-v="${g}"`, g === "New In" && d.grupo === g && dias != null ? `New In · ${Math.max(0, CL_NEWIN_DIAS - dias)} d → Colección` : g, g === "Colección" && d.grupo !== g ? "border-color:#5DCAA5" : "")).join("")}</div>
-        <div class="flex flex-wrap gap-1.5 items-center mt-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(d.tendencias.includes(t), `data-clt="${p.id}" data-v="${focoEsc(t)}"`, t, d.tendencias.includes(t) ? "background:#eef2ff;color:#4338ca;border-color:#4f46e5" : "")).join("")}<button class="pill" data-clnt="${p.id}" style="border-style:dashed">+ Nueva tendencia</button></div>
-        <div class="flex flex-wrap gap-2 mt-3">
-          ${guardando ? '<button class="pill active" disabled style="opacity:.7">Guardando…</button>'
-            : pendiente ? `<button class="pill active" data-clsave="${p.id}">${yaGuardado ? "Guardar cambios" : "Guardar"}</button>${yaGuardado ? `<button class="pill" data-clundo="${p.id}">Deshacer</button>` : ""}` : ""}
-          ${c.rechazado ? `<button class="pill" data-clunrej="${p.id}">Volver a tener en cuenta</button>` : `<button class="pill" data-clrej="${p.id}" style="color:#b91c1c;border-color:#fca5a5">Rechazar · no va al foco</button>`}
-        </div>
-      </div></div>`;
-  }
-  function renderClasif() {
-    try { renderFam(); } catch (e) { console.error(e); }
-    const cont = document.getElementById("clasifLista"); if (!cont || !data) return;
-    const pend = clParaAsignar();
-    // El número rojo de Clasificar ahora lo pone renderFam (nuevos ingresos sin revisar en Familias).
-    const rech = clProds().filter(p => (clDe(p) || {}).rechazado), asig = clAsignados();
-    const tabs = [["asignar", `Para asignar (${pend.length})`], ["clasificados", `Clasificados (${asig.length})`], ["rechazados", `Rechazados (${rech.length})`]];
-    document.getElementById("clasifTabs").innerHTML = tabs.map(([k, l]) => `<button class="pill ${clTab === k ? "active" : ""}" data-clt-tab="${k}">${l}</button>`).join("");
-    if (clTab === "masvend") clTab = "asignar";
-    const q = clBusca.trim().toLowerCase(), filt = l => q ? l.filter(p => String(p.producto || "").toLowerCase().includes(q)) : l;
-    let html = "";
-    if (clTab === "asignar") html = `<p class="text-xs text-slate-500 mb-3">Productos con stock que todavía no clasificaste, los más nuevos primero. Cuando entra uno nuevo o vuelve a tener stock uno sin clasificar, aparece acá. También vuelven los que estaban en “Más vendidos”, para que les elijas grupo.</p>` + (filt(pend).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">No hay productos para asignar. 🎉</div>');
-    else if (clTab === "clasificados") html = filt(asig).sort((a, b) => String(b.creado || "").localeCompare(String(a.creado || ""))).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">Todavía no clasificaste productos.</div>';
-    else if (clTab === "rechazados") html = filt(rech).map(clCard).join("") || '<div class="card p-4 text-sm text-slate-500">No hay rechazados.</div>';
-    cont.innerHTML = html;
-    const set = (pid, fn) => { const d = clDraft[pid]; fn(d); renderClasif(); };
-    cont.querySelectorAll("[data-clb]").forEach(b => b.onclick = () => set(b.dataset.clb, d => d.base = d.base === b.dataset.v ? "" : b.dataset.v));
-    cont.querySelectorAll("[data-clg]").forEach(b => b.onclick = () => set(b.dataset.clg, d => d.grupo = d.grupo === b.dataset.v ? "" : b.dataset.v));
-    cont.querySelectorAll("[data-clt]").forEach(b => b.onclick = () => set(b.dataset.clt, d => { const i = d.tendencias.indexOf(b.dataset.v); i >= 0 ? d.tendencias.splice(i, 1) : d.tendencias.push(b.dataset.v); }));
-    cont.querySelectorAll("[data-clnt]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la tendencia nueva (ej. Lunares):") || "").trim(); if (!n) return;
-      if (clEsGrupo(n)) { alert(`"${n}" ya es un grupo. Elegilo en Grupo.`); return; }
-      if (!clCfg.tendencias.some(t => t.toLowerCase() === n.toLowerCase())) db.ref("dashboard_clasif/cfg/tendencias").set([...clCfg.tendencias, n]);
-      const d = clDraft[b.dataset.clnt]; const ex = clCfg.tendencias.find(t => t.toLowerCase() === n.toLowerCase()) || n; if (!d.tendencias.includes(ex)) d.tendencias.push(ex); renderClasif(); });
-    cont.querySelectorAll("[data-clnb]").forEach(b => b.onclick = () => { const n = (prompt("Nombre de la categoría nueva (ej. Musculosa):") || "").trim(); if (!n) return;
-      const ex = clCfg.bases.find(x => x.toLowerCase() === n.toLowerCase());
-      if (!ex) db.ref("dashboard_clasif/cfg/bases").set([...clCfg.bases, n]);
-      clDraft[b.dataset.clnb].base = ex || n; renderClasif(); });
-    cont.querySelectorAll("[data-clsave]").forEach(b => b.onclick = () => { const pid = b.dataset.clsave, d = clDraft[pid];
-      if (!d.base) { alert("Elegí la categoría"); return; }
-      const t = {}; d.tendencias.forEach(x => t[clKey(x)] = true);
-      const fallo = e => { delete clGuardando[pid]; renderClasif(); alert("No se pudo guardar: " + (e && e.message || e)); };
-      clGuardando[pid] = true; renderClasif();
-      try {
-        db.ref("dashboard_clasif/items/" + pid).update({ base: d.base, grupo: d.grupo || null, tendencias: Object.keys(t).length ? t : null, rechazado: null, ts: Date.now() })
-          .then(() => { delete clGuardando[pid]; delete clDraft[pid]; renderClasif(); }, fallo);
-      } catch (e) { fallo(e); } });
-    cont.querySelectorAll("[data-clundo]").forEach(b => b.onclick = () => { delete clDraft[b.dataset.clundo]; renderClasif(); });
-    cont.querySelectorAll("[data-clrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clrej).update({ rechazado: true, ts: Date.now() }); delete clDraft[b.dataset.clrej]; });
-    cont.querySelectorAll("[data-clunrej]").forEach(b => b.onclick = () => { db.ref("dashboard_clasif/items/" + b.dataset.clunrej + "/rechazado").remove(); delete clDraft[b.dataset.clunrej]; });
-    document.querySelectorAll("[data-clt-tab]").forEach(b => b.onclick = () => { clTab = b.dataset.cltTab; renderClasif(); });
-  }
-  document.getElementById("clasifBusca").addEventListener("input", e => { clBusca = e.target.value; renderClasif(); });
+  function renderClasif() {} // la clasificación anterior se sacó (nov 2026): todo se clasifica en Familias
 
   // ===================== Familias (clasificación nueva) =====================
   // Familia = código sin el número de estampa: base + letra de tela (4699A21 -> 4699A).
@@ -898,14 +823,42 @@
   const FM_LINEAS_DEF = ["Básicos", "Rayas", "Estampas", "Encaje", "Bordados", "Tejidos", "Denim"];
   let fmArt = {}, fmFam = {}, fmLineas = FM_LINEAS_DEF.slice(), fmCargado = false, fmRevInit = false, fmVer = "todas", fmVista = "familias", fmTemp = "act", fmCat = "Remera", fmOrd = "acc", fmQ = "", fmOpen = {}, fmSel = {};
   const fmK = c => stNorm(c).replace(/[.#$\[\]\/]/g, "_");
+  let fmCats = null, fmMigrado = false;
   db.ref("dashboard_familias").on("value", s => { const v = s.val() || {}; fmArt = v.art || {}; fmFam = v.fam || {}; fmCargado = true; fmRevInit = !!(v.cfg && v.cfg.rev_init);
-    fmLineas = (v.cfg && v.cfg.lineas && v.cfg.lineas.length) ? v.cfg.lineas : FM_LINEAS_DEF.slice(); if (data) renderFam(); });
+    fmLineas = (v.cfg && v.cfg.lineas && v.cfg.lineas.length) ? v.cfg.lineas : FM_LINEAS_DEF.slice();
+    fmCats = (v.cfg && v.cfg.cats && v.cfg.cats.length) ? v.cfg.cats : null; fmMigrado = !!(v.cfg && v.cfg.migr_clasif);
+    fmSyncCfg();
+    if (data) { renderFam(); try { renderFoco(); } catch (e) { console.error(e); } try { renderClasifDash(); } catch (e) {} if (pmId != null) pmRender(); } });
+  // Listas que usan Foco y Tablero: categorías y líneas (= tendencias) salen de Clasificar.
+  function fmCatsLista() { if (fmCats) return fmCats;
+    const l = []; [...(clCfgViejo ? clCfgViejo.bases : []), ...FM_CATS.map(x => x[0])].forEach(c => { if (c && !l.some(x => clNorm(x) === clNorm(c))) l.push(c); }); return l; }
+  function fmSyncCfg() { clCfg.bases = fmCatsLista(); clCfg.tendencias = fmLineas.slice(); }
+  // Migración (una sola vez): lo cargado en la clasificación anterior pasa a Clasificar.
+  //  categoría -> cat, tendencias -> líneas (se suman a las que ya tenía), grupo Sale -> Liquidación,
+  //  grupo Básicos -> línea Básicos, rechazado -> rech. Las tendencias y categorías nuevas se agregan a las listas.
+  function fmMigrar() {
+    if (fmMigrado || !fmCargado || !clCargado || !data) return; fmMigrado = true;
+    const upd = {}, lineas = fmLineas.slice(), cats = fmCatsLista().slice();
+    const suma = (lst, x) => { const e = lst.find(y => clNorm(y) === clNorm(x)); if (e) return e; lst.push(x); return x; };
+    clCfgViejo.tendencias.forEach(t => suma(lineas, t));
+    (data.productos || []).forEach(p => { const c = clItems[p.id], cod = p && stCodigo(p); if (!c || !cod) return;
+      const k = fmK(cod), a = fmArt[k] || {};
+      if (c.base && !a.cat) upd["art/" + k + "/cat"] = suma(cats, c.base);
+      const viejas = Object.keys(c.tendencias || {}).map(clUnkey).filter(t => !clEsGrupo(t)).map(t => suma(lineas, t));
+      if (c.grupo === "Básicos") viejas.push("Básicos");
+      if (viejas.length) { const act = a.li ? Object.keys(a.li).filter(x => x !== "_ninguna").map(clUnkey) : fmLineasSug(p, c.base || fmCatDe(p));
+        const o = {}; [...new Set(act.concat(viejas))].forEach(x => o[clKey(x)] = true); upd["art/" + k + "/li"] = o; }
+      if (c.grupo === "Sale" && a.liq == null) upd["art/" + k + "/liq"] = true;
+      if (c.rechazado && a.rech == null) upd["art/" + k + "/rech"] = true; });
+    upd["cfg/lineas"] = lineas; upd["cfg/cats"] = cats; upd["cfg/migr_clasif"] = Date.now();
+    db.ref("dashboard_familias").update(upd);
+  }
   function fmFamCod(c) { c = stNorm(c);
     let m = c.match(/^(\d{3,4}[A-Z]+)\d*$/); if (m) return m[1];
     m = c.match(/^(\d{4})\d{2}$/); if (m) return m[1];
     return c; }
   const FM_CATS = [["Remera", /^(remera|remeron|chomba ml|musculosa crop)/i], ["Top", /^(top|musculosa)/i], ["Body", /^body/i], ["Buzo", /^(buzo|chomba lublin)/i], ["Sweater", /^(sweater|polera|super amplio)/i], ["Campera", /^(campera|gamulan|tapado|bomber|piloto|saco|cardigan)/i], ["Jean", /^(jean|bermuda larga)/i], ["Pantalón", /^(pantalon|jogging)/i], ["Short", /^(short|bermuda)/i], ["Vestido", /^(vestido|mono)/i], ["Mini", /^(mini|pollera)/i], ["Bikini", /^(bikini|malla)/i], ["Blazer", /^blazer/i], ["Camisa", /^camisa/i], ["Accesorio", /^(gorr|bufanda|pack)/i], ["Tejidos", /^(chomba|chaleco)/i]];
-  const fmCatDe = p => (clDe(p) || {}).base || (FM_CATS.find(x => x[1].test(p.producto || "")) || ["Otro"])[0];
+  const fmCatDe = p => { const a = fmArt[fmK(stCodigo(p) || "")]; return (a && a.cat) || (clDeViejo(p) || {}).base || (FM_CATS.find(x => x[1].test(p.producto || "")) || ["Otro"])[0]; };
   const FM_TELAS = [[/alg(odon|\.)?\s*c(on|\/)?\s*lycra/i, "Algodón c/ Lycra"], [/morley jerry/i, "Morley Jerry"], [/taylor/i, "Morley Taylor"], [/morley poli/i, "Morley Poli"], [/morley diesel/i, "Morley Diesel"], [/ribb janka/i, "Ribb Janka"], [/rib+ carrie/i, "Ribb Carrie"], [/boston ribb/i, "Boston Ribb"], [/westwood/i, "Westwood Ribb"], [/melina/i, "Melina"], [/jersey/i, "Jersey"], [/friza/i, "Friza"], [/rustico/i, "Rústico"], [/lino/i, "Lino"], [/rayon/i, "Rayón"], [/lewis/i, "Lewis"], [/uniqlo/i, "Uniqlo"], [/denim|denin/i, "Denim"], [/creep/i, "Creep"], [/tricot/i, "Tricot"], [/bengalina/i, "Bengalina"]];
   const fmTelaSug = nombres => { for (const n of nombres) { const t = FM_TELAS.find(x => x[0].test(n)); if (t) return t[1]; } return ""; };
   function fmLineasSug(p, cat) { const n = p.producto || "", c = stNorm(stCodigo(p)), li = [];
@@ -915,6 +868,8 @@
     if (/encaje|puntilla/i.test(n)) li.push("Encaje");
     if (cat === "Tejidos" || cat === "Sweater") li.push("Tejidos");
     if (cat === "Jean") li.push("Denim");
+    // Líneas creadas a mano: se sugieren si el nombre del artículo las nombra (ej. "Dotty").
+    fmLineas.filter(l => !FM_LINEAS_DEF.includes(l) && !li.includes(l) && clNorm(n).includes(clNorm(l))).forEach(l => li.push(l));
     if (!li.length && /^(Remera|Top|Body)$/.test(cat)) li.push("Básicos");
     return li; }
   const fmLineasDe = (p, cat) => { const a = fmArt[fmK(stCodigo(p))]; return a && a.li ? Object.keys(a.li).filter(k => k !== "_ninguna").map(clUnkey) : fmLineasSug(p, cat); };
@@ -962,9 +917,7 @@
   }
   function renderFam() {
     const cont = document.getElementById("famLista"); if (!cont || !data) return;
-    document.getElementById("famBox").style.display = fmVista === "familias" ? "" : "none";
-    document.getElementById("clasifViejo").style.display = fmVista === "anterior" ? "" : "none";
-    document.querySelectorAll("[data-fmvista]").forEach(b => b.classList.toggle("active", b.dataset.fmvista === fmVista));
+    fmMigrar();
     let datosFam = null;
     if (stockActual) {
       datosFam = fmDatos();
@@ -1017,7 +970,7 @@
     }).filter(Boolean).sort((x, y) => fmOrd === "nuevo" ? y.alta - x.alta : fmOrd === "cod" ? x.cod.localeCompare(y.cod, "es", { numeric: true }) : fmOrd === "vend" ? y.v - x.v : fmOrd === "stock" ? y.s - x.s : x.ac.o - y.ac.o || y.s - x.s);
     const nArt = vis.reduce((t, f) => t + f.it.length, 0);
     h += `<p class="text-xs text-slate-500 mb-2">${nArt} artículos en ${vis.length} familias. Ventas web + local de los últimos 30 días; stock Nina + Avellaneda. Los totales de cada familia suman todos sus artículos actuales.</p>`;
-    h += `<div class="card p-0 overflow-x-auto"><div style="min-width:980px">
+    h += `<div class="card p-0 overflow-x-auto"><div style="min-width:1080px">
       <div class="grid gap-3 px-4 py-2 text-[11px] font-semibold text-slate-500 border-b border-slate-200" style="grid-template-columns:minmax(300px,1fr) 70px 80px 90px 170px"><div>Familia / artículo</div><div class="text-right">Stock</div><div class="text-right">Vend. 30 d</div><div class="text-right">Alcanza</div><div>Qué hacer</div></div>`;
     vis.forEach(F => { const ab = !!fmOpen[F.k];
       h += `<div class="border-b border-slate-200"><button data-fmtog="${fmEsc(F.k)}" class="grid gap-3 w-full px-4 py-2.5 text-left items-center ${ab ? "bg-slate-50" : "bg-white"}" style="grid-template-columns:minmax(300px,1fr) 70px 80px 90px 170px">
@@ -1031,18 +984,55 @@
           <label class="text-xs font-semibold text-slate-500 flex items-center gap-2">Tela<input data-fmtela="${fmEsc(F.k)}" value="${fmEsc(F.tela)}" placeholder="${fmEsc(F.telaSug || "Sin dato")}" class="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-44 font-normal text-slate-800"></label>
           <button class="pill" data-fmguardar="${fmEsc(F.k)}">Guardar</button></div>`;
         F.it.forEach(a => { const k = fmK(a.c);
-          h += `<div class="grid gap-3 items-center px-4 py-2 pl-9 border-t border-slate-100 text-sm" style="grid-template-columns:minmax(300px,1fr) 70px 80px 300px">
+          h += `<div class="grid gap-3 items-center px-4 py-2 pl-9 border-t border-slate-100 text-sm" style="grid-template-columns:minmax(300px,1fr) 70px 80px 400px">
             <div class="flex gap-2.5 items-center min-w-0"><input type="checkbox" data-fmsel="${fmEsc(k)}" ${fmSel[k] ? "checked" : ""} class="w-4 h-4" aria-label="Seleccionar ${fmEsc(a.c)}">
             ${a.p.imagen ? `<img src="${fmEsc(a.p.imagen)}" alt="" loading="lazy" class="w-10 h-12 object-cover rounded bg-slate-100 shrink-0" onerror="this.style.visibility='hidden'">` : `<div class="w-10 h-12 rounded bg-slate-100 shrink-0"></div>`}
             <div class="min-w-0"><div><b>${fmEsc(a.c)}</b> - ${fmEsc(a.p.producto)}${a.nuevo && !fmRevisado(a.c) ? ' <span class="chip" style="background:#dcfce7;color:#166534">nuevo</span>' : ""}</div><div class="text-[11px] text-slate-500">${fmEsc(a.t || "")}${a.corte ? (a.t ? " · " : "") + fmEsc(a.corte) : ""}</div></div></div>
             <div class="text-right">${fmtNum(a.s)}</div><div class="text-right">${fmtNum(a.v)}</div>
-            <div class="flex flex-col gap-1.5"><select data-fmmov="${fmEsc(k)}" class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs">${optsFam(a.f)}</select>
-            <div class="flex flex-wrap gap-1">${fmLineas.map(l => { const on = a.li.includes(l); return `<button data-fmli="${fmEsc(k)}" data-v="${fmEsc(l)}" class="pill ${on ? "active" : ""}" style="padding:.2rem .55rem;font-size:.68rem">${fmEsc(l)}</button>`; }).join("")}</div></div></div>`; });
+            ${fmCtrlHtml(a, optsFam)}</div>`; });
       }
       h += `</div>`; });
     h += `</div></div>`;
     if (!vis.length) h += '<div class="card p-4 text-sm text-slate-500 mt-2">No hay artículos con ese filtro.</div>';
     cont.innerHTML = h; fmBind(cont, act);
+  }
+  // Controles de un artículo (los mismos en la familia abierta, en Nuevos y en la ficha):
+  // categoría y familia (con "+ nueva" ahí mismo), líneas (con "+ Línea") y Liquidación.
+  function fmItemPorK(k) { const p = (data && data.productos || []).find(x => x && stCodigo(x) && fmK(stCodigo(x)) === k); if (!p) return null;
+    const cat = fmCatDe(p); return { p, c: stCodigo(p), cat, li: fmLineasDe(p, cat), f: fmFamDe(p) }; }
+  function fmOptsFamGlobal(sel) { const g = {};
+    (data && data.productos || []).forEach(p => { const c = p && stCodigo(p); if (c) (g[fmFamDe(p)] = g[fmFamDe(p)] || []).push({ p, c }); });
+    const ks = [...new Set(Object.keys(g).concat(Object.keys(fmFam), sel ? [sel] : []))];
+    return ks.map(k => ({ k, n: (fmFam[k] && fmFam[k].n) || (g[k] ? fmNombreSug(k, g[k]) : "Familia " + k) })).sort((a, b) => a.n.localeCompare(b.n))
+      .map(f => `<option value="${fmEsc(f.k)}" ${f.k === sel ? "selected" : ""}>${fmEsc(f.n)}</option>`).join(""); }
+  function fmCtrlHtml(a, optsFam) { const k = fmK(a.c), liq = !!(fmArt[k] && fmArt[k].liq), chico = "padding:.2rem .55rem;font-size:.68rem";
+    const selC = 'class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs"';
+    const cats = fmCatsLista().slice(); if (a.cat && !cats.includes(a.cat)) cats.push(a.cat);
+    return `<div class="flex flex-col gap-1.5"><div class="flex gap-1.5">
+      <select data-fmcatsel="${fmEsc(k)}" ${selC} style="width:125px" aria-label="Categoría de ${fmEsc(a.c)}">${cats.map(c => `<option value="${fmEsc(c)}" ${c === a.cat ? "selected" : ""}>${fmEsc(c)}</option>`).join("")}<option value="__nueva">+ Categoría nueva…</option></select>
+      <select data-fmmov="${fmEsc(k)}" ${selC} style="flex:1;min-width:0" aria-label="Familia de ${fmEsc(a.c)}">${optsFam(a.f)}<option value="__nueva">+ Familia nueva…</option></select></div>
+      <div class="flex flex-wrap gap-1">${fmLineas.map(l => `<button data-fmli="${fmEsc(k)}" data-v="${fmEsc(l)}" class="pill ${a.li.includes(l) ? "active" : ""}" style="${chico}">${fmEsc(l)}</button>`).join("")}
+      <button data-fmnli="${fmEsc(k)}" class="pill" style="${chico};border-style:dashed">+ Línea</button>
+      <button data-fmliq="${fmEsc(k)}" class="pill" style="${chico};${liq ? "background:#9B5C6B;color:#fff;border-color:#9B5C6B" : "color:#9B5C6B;border-color:#9B5C6B"}" title="Pasa a Sale y no entra en Reponer">Liquidación</button></div></div>`; }
+  function fmBindCtrl(root, rerender) {
+    const ref = k => db.ref("dashboard_familias/art/" + k), igual = (lst, n) => lst.find(x => clNorm(x) === clNorm(n));
+    root.querySelectorAll("[data-fmmov]").forEach(el => el.onchange = () => { const k = el.dataset.fmmov;
+      if (el.value !== "__nueva") { ref(k + "/f").set(el.value); fmOpen[el.value] = true; return; }
+      const n = (prompt("Nombre de la familia nueva:") || "").trim(); if (!n) { rerender(); return; }
+      const fk = "u" + Date.now(); fmOpen[fk] = true;
+      db.ref("dashboard_familias").update({ ["fam/" + fk]: { n, creada: Date.now() }, ["art/" + k + "/f"]: fk }); });
+    root.querySelectorAll("[data-fmcatsel]").forEach(el => el.onchange = () => { const k = el.dataset.fmcatsel; let c = el.value;
+      if (c === "__nueva") { const n = (prompt("Nombre de la categoría nueva (ej. Musculosa):") || "").trim(); if (!n) { rerender(); return; }
+        const lst = fmCatsLista(); c = igual(lst, n) || n; if (!igual(lst, n)) db.ref("dashboard_familias/cfg/cats").set(lst.concat(n)); }
+      ref(k + "/cat").set(c); });
+    const ponerLi = (k, li) => { const o = {}; li.forEach(x => o[clKey(x)] = true); ref(k + "/li").set(Object.keys(o).length ? o : { _ninguna: true }); };
+    root.querySelectorAll("[data-fmli]").forEach(b => b.onclick = () => { const k = b.dataset.fmli, a = fmItemPorK(k), l = b.dataset.v; if (!a) return;
+      ponerLi(k, a.li.includes(l) ? a.li.filter(x => x !== l) : a.li.concat(l)); });
+    root.querySelectorAll("[data-fmnli]").forEach(b => b.onclick = () => { const k = b.dataset.fmnli, a = fmItemPorK(k); if (!a) return;
+      const n = (prompt("Nombre de la línea nueva (ej. Dotty):") || "").trim(); if (!n) return;
+      const l = igual(fmLineas, n) || n; if (!igual(fmLineas, n)) db.ref("dashboard_familias/cfg/lineas").set(fmLineas.concat(n));
+      if (!a.li.includes(l)) ponerLi(k, a.li.concat(l)); });
+    root.querySelectorAll("[data-fmliq]").forEach(b => b.onclick = () => { const k = b.dataset.fmliq; ref(k + "/liq").set(fmArt[k] && fmArt[k].liq ? null : true); });
   }
   // Lista de nuevos sin revisar: un renglón por artículo, con la familia donde cayó, sus líneas
   // y los mismos controles que adentro de la familia (mover / líneas) + "Revisado".
@@ -1052,18 +1042,17 @@
     const nomFam = k => (fmFam[k] && fmFam[k].n) || (grupos[k] ? fmNombreSug(k, grupos[k]) : "Familia " + k);
     const todasFam = [...new Set(Object.keys(grupos).concat(Object.keys(fmFam)))].map(k => ({ k, n: nomFam(k) })).sort((a, b) => a.n.localeCompare(b.n));
     const optsFam = sel => todasFam.map(f => `<option value="${fmEsc(f.k)}" ${f.k === sel ? "selected" : ""}>${fmEsc(f.n)}</option>`).join("");
-    let h = `<p class="text-xs text-slate-500 mb-2">${pend.length} ${pend.length === 1 ? "artículo nuevo" : "artículos nuevos"} (alta en los últimos ${FM_NUEVO_DIAS} días). Revisá la familia y las líneas, y marcalo como revisado.</p>
-      <div class="card p-0 overflow-x-auto"><div style="min-width:980px">
-      <div class="grid gap-3 px-4 py-2 text-[11px] font-semibold text-slate-500 border-b border-slate-200" style="grid-template-columns:minmax(300px,1fr) 60px 60px 300px 110px"><div>Artículo</div><div class="text-right">Stock</div><div class="text-right">Alta</div><div>Familia y líneas</div><div></div></div>`;
+    let h = `<p class="text-xs text-slate-500 mb-2">${pend.length} ${pend.length === 1 ? "artículo nuevo" : "artículos nuevos"} (alta en los últimos ${FM_NUEVO_DIAS} días). Revisá categoría, familia y líneas (si falta alguna, creala ahí mismo con “+ nueva”) y marcalo como revisado.</p>
+      <div class="card p-0 overflow-x-auto"><div style="min-width:1080px">
+      <div class="grid gap-3 px-4 py-2 text-[11px] font-semibold text-slate-500 border-b border-slate-200" style="grid-template-columns:minmax(300px,1fr) 60px 60px 400px 110px"><div>Artículo</div><div class="text-right">Stock</div><div class="text-right">Alta</div><div>Categoría, familia y líneas</div><div></div></div>`;
     pend.slice().sort((x, y) => new Date(y.p.creado || 0) - new Date(x.p.creado || 0)).forEach(a => { const k = fmK(a.c), fam = grupos[a.f] || [], sola = fam.length <= 1;
       const famTxt = sola ? '<span style="color:#b45309">familia nueva (sola)</span>' : `entró en familia ${fmEsc(nomFam(a.f))} (${fam.length})`;
       const linTxt = a.li.length ? fmEsc(a.li.join(", ")) : '<span style="color:#b91c1c;font-weight:600">sin línea</span>';
-      h += `<div class="grid gap-3 items-center px-4 py-2.5 border-b border-slate-100 text-sm" style="grid-template-columns:minmax(300px,1fr) 60px 60px 300px 110px">
+      h += `<div class="grid gap-3 items-center px-4 py-2.5 border-b border-slate-100 text-sm" style="grid-template-columns:minmax(300px,1fr) 60px 60px 400px 110px">
         <div class="flex gap-2.5 items-center min-w-0">${a.p.imagen ? `<img src="${fmEsc(a.p.imagen)}" alt="" loading="lazy" class="w-10 h-12 object-cover rounded bg-slate-100 shrink-0" onerror="this.style.visibility='hidden'">` : `<div class="w-10 h-12 rounded bg-slate-100 shrink-0"></div>`}
         <div class="min-w-0"><div><b>${fmEsc(a.c)}</b> - ${fmEsc(a.p.producto)} <span class="chip" style="background:#dcfce7;color:#166534">nuevo</span></div><div class="text-[11px] text-slate-500">${fmEsc(a.cat)} · ${famTxt} · ${linTxt}${a.t ? "" : " · aún no está en la planilla de stock"}</div></div></div>
         <div class="text-right">${fmtNum(a.s)}</div><div class="text-right text-xs text-slate-500">${fmFechaCorta(a.p.creado)}</div>
-        <div class="flex flex-col gap-1.5"><select data-fmmov="${fmEsc(k)}" class="border border-slate-200 rounded-lg px-2 py-1.5 text-xs">${optsFam(a.f)}</select>
-        <div class="flex flex-wrap gap-1">${fmLineas.map(l => { const on = a.li.includes(l); return `<button data-fmli="${fmEsc(k)}" data-v="${fmEsc(l)}" class="pill ${on ? "active" : ""}" style="padding:.2rem .55rem;font-size:.68rem">${fmEsc(l)}</button>`; }).join("")}</div></div>
+        ${fmCtrlHtml(a, optsFam)}
         <div><button class="pill" data-fmrev="${fmEsc(k)}" style="border-color:#4f46e5;color:#4f46e5">✓ Revisado</button></div></div>`; });
     return h + `</div></div>`;
   }
@@ -1077,10 +1066,7 @@
     on("[data-fmrev]", b => { db.ref("dashboard_familias/art/" + b.dataset.fmrev + "/rev").set(Date.now()); });
     on("[data-fmtog]", b => { fmOpen[b.dataset.fmtog] = !fmOpen[b.dataset.fmtog]; renderFam(); });
     on("[data-fmsel]", el => { fmSel[el.dataset.fmsel] = el.checked; renderFam(); }, "onchange");
-    on("[data-fmmov]", el => { const k = el.dataset.fmmov; db.ref("dashboard_familias/art/" + k + "/f").set(el.value); fmOpen[el.value] = true; }, "onchange");
-    on("[data-fmli]", b => { const k = b.dataset.fmli, a = byK[k], l = b.dataset.v; if (!a) return;
-      const li = a.li.includes(l) ? a.li.filter(x => x !== l) : a.li.concat(l), o = {}; li.forEach(x => o[clKey(x)] = true);
-      db.ref("dashboard_familias/art/" + k + "/li").set(Object.keys(o).length ? o : { _ninguna: true }); });
+    fmBindCtrl(cont, renderFam);
     on("[data-fmguardar]", b => { const k = b.dataset.fmguardar;
       const nom = (cont.querySelector(`[data-fmnom="${CSS.escape(k)}"]`) || {}).value, tela = (cont.querySelector(`[data-fmtela="${CSS.escape(k)}"]`) || {}).value;
       db.ref("dashboard_familias/fam/" + k).update({ n: String(nom || "").trim() || null, tela: String(tela || "").trim() || null, ts: Date.now() }); });
@@ -1094,7 +1080,6 @@
       db.ref("dashboard_familias").update(upd); fmOpen[mv.value] = true; fmSel = {}; };
     const lp = cont.querySelector("#fmLimpiar"); if (lp) lp.onclick = () => { fmSel = {}; renderFam(); };
   }
-  document.querySelectorAll("[data-fmvista]").forEach(b => b.onclick = () => { fmVista = b.dataset.fmvista; renderFam(); if (fmVista === "anterior") renderClasif(); });
 
   // Foco con la clasificación propia: por grupo, por tendencia o por categoría base.
   function renderFocoClasif() {
@@ -1862,7 +1847,7 @@
   function pmAbrir(id) {
     const p = (data && data.productos || []).find(x => String(x.id) === String(id)); if (!p) return;
     pmId = p.id; const c = clDe(p) || {};
-    pmDraft = { base: c.base || "", grupo: clGrupo(p, c.grupo || ""), tendencias: clTendDe(p).filter(t => !clEsGrupo(t)) };
+
     pmRender();
   }
   function pmRender() {
@@ -1902,7 +1887,7 @@
         ${pasar ? `<div class="text-xs mt-1"><span class="chip" style="background:#E6F1FB;color:#0C447C">Pasar del local</span> ${fmtNum(pasar)} prendas que están en 0 en la web</div>` : ""}` : "");
     const precio = Math.max(0, ...vars.map(v => v.precio || 0)), promos = vars.map(v => Number(v.promo) || 0).filter(x => x > 0), promo = promos.length ? Math.max(...promos) : 0;
     const chip = (on, attrs, txt) => `<button class="pill ${on ? "active" : ""}" ${attrs}>${focoEsc(txt)}</button>`;
-    const pend = !clasificado || pmDraft.base !== (c.base || "") || pmDraft.grupo !== clGrupo(p, c.grupo || "") || [...pmDraft.tendencias].sort().join("|") !== clTendDe(p).filter(t => !clEsGrupo(t)).sort().join("|");
+    const pmIt = stCodigo(p) ? fmItemPorK(fmK(stCodigo(p))) : null;
     const dato = (l, v) => `<div><div class="text-[11px] text-slate-500">${l}</div><div class="font-bold text-base">${v}</div></div>`;
     m.innerHTML = `<div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden">
       <div class="flex justify-between items-start gap-3 px-5 pt-4 pb-3 border-b border-slate-100">
@@ -1924,31 +1909,17 @@
           <div><div class="text-xs font-semibold text-slate-500 mb-1">Stock por color y talle <span class="font-normal text-slate-400">· ${avD ? "web · Avellaneda · " : ""}"v" = vendidas web ${perL}</span></div>${grilla}</div>
           <div class="border-t border-slate-100 pt-3">
             <div class="flex items-baseline justify-between mb-2"><div class="font-bold text-sm">Clasificación</div>
-              ${clasificado ? `<span class="chip" style="background:#EAF3DE;color:#27500A">Clasificado</span>` : c.rechazado ? `<span class="chip chip-low">Rechazado</span>` : `<span class="chip chip-amber">Sin clasificar</span>`}</div>
-            <div class="flex flex-wrap gap-1.5 items-center mb-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Categoría</span>${clCfg.bases.map(b => chip(pmDraft.base === b, `data-pmb="${focoEsc(b)}"`, b)).join("")}</div>
-            <div class="flex flex-wrap gap-1.5 items-center mb-1.5"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Grupo</span>${CL_GRUPOS.map(g => chip(pmDraft.grupo === g, `data-pmg="${g}"`, g)).join("")}</div>
-            <div class="flex flex-wrap gap-1.5 items-center mb-3"><span class="text-[10px] font-bold uppercase tracking-wide text-slate-400 w-20">Tendencias</span>${clCfg.tendencias.map(t => chip(pmDraft.tendencias.includes(t), `data-pmt="${focoEsc(t)}"`, t)).join("") || '<span class="text-xs text-slate-400">Se crean en Clasificar</span>'}</div>
-            <div class="flex flex-wrap gap-2 items-center">
-              ${pend ? `<button class="pill active" id="pmSave">${clasificado ? "Guardar cambios" : "Guardar clasificación"}</button>` : `<span class="text-xs text-slate-400">Sin cambios</span>`}
-              ${c.rechazado ? `<button class="pill" id="pmUnrej">Volver a tener en cuenta</button>` : `<button class="pill" id="pmRej" style="color:#b91c1c;border-color:#fca5a5">Rechazar · no va al foco</button>`}
-              <span id="pmMsg" class="text-xs"></span></div>
+              ${c.rechazado ? `<span class="chip chip-low">Rechazado</span>` : `<span class="chip" style="background:#E6F1FB;color:#0C447C">${focoEsc(c.grupo)}</span>`}</div>
+            ${pmIt ? fmCtrlHtml(pmIt, fmOptsFamGlobal) : '<div class="text-xs text-slate-400">Este artículo no tiene código, no se puede clasificar.</div>'}
+            <div class="flex flex-wrap gap-2 items-center mt-3">
+              ${pmIt ? (c.rechazado ? `<button class="pill" id="pmUnrej">Volver a tener en cuenta</button>` : `<button class="pill" id="pmRej" style="color:#b91c1c;border-color:#fca5a5">Rechazar · no va al foco</button>`) : ""}
+              <span class="text-xs text-slate-400">Los cambios se guardan solos.</span></div>
           </div>
         </div></div></div>`;
-    const set = fn => { fn(pmDraft); pmRender(); };
     m.querySelector("#pmX").onclick = pmCerrar;
-    m.querySelectorAll("[data-pmb]").forEach(b => b.onclick = () => set(d => d.base = d.base === b.dataset.pmb ? "" : b.dataset.pmb));
-    m.querySelectorAll("[data-pmg]").forEach(b => b.onclick = () => set(d => d.grupo = d.grupo === b.dataset.pmg ? "" : b.dataset.pmg));
-    m.querySelectorAll("[data-pmt]").forEach(b => b.onclick = () => set(d => { const i = d.tendencias.indexOf(b.dataset.pmt); i >= 0 ? d.tendencias.splice(i, 1) : d.tendencias.push(b.dataset.pmt); }));
-    const sv = m.querySelector("#pmSave");
-    if (sv) sv.onclick = () => {
-      if (!pmDraft.base) { m.querySelector("#pmMsg").innerHTML = '<span style="color:#b91c1c">Elegí la categoría</span>'; return; }
-      const t = {}; pmDraft.tendencias.forEach(x => t[clKey(x)] = true);
-      sv.disabled = true; sv.textContent = "Guardando…";
-      db.ref("dashboard_clasif/items/" + p.id).update({ base: pmDraft.base, grupo: pmDraft.grupo || null, tendencias: Object.keys(t).length ? t : null, rechazado: null, ts: Date.now() })
-        .then(() => { delete clDraft[p.id]; pmRender(); }, err => { m.querySelector("#pmMsg").innerHTML = `<span style="color:#b91c1c">No se pudo guardar: ${focoEsc(err && err.message || err)}</span>`; });
-    };
-    const rj = m.querySelector("#pmRej"); if (rj) rj.onclick = () => db.ref("dashboard_clasif/items/" + p.id).update({ rechazado: true, ts: Date.now() }).then(pmRender);
-    const ur = m.querySelector("#pmUnrej"); if (ur) ur.onclick = () => db.ref("dashboard_clasif/items/" + p.id + "/rechazado").remove().then(pmRender);
+    if (pmIt) { fmBindCtrl(m, pmRender); const kk = fmK(pmIt.c);
+      const rj = m.querySelector("#pmRej"); if (rj) rj.onclick = () => db.ref("dashboard_familias/art/" + kk + "/rech").set(true);
+      const ur = m.querySelector("#pmUnrej"); if (ur) ur.onclick = () => db.ref("dashboard_familias/art/" + kk + "/rech").remove(); }
   }
   document.addEventListener("click", e => { const el = e.target.closest("[data-prodopen]"); if (el && !e.target.closest("select,input,button")) pmAbrir(el.dataset.prodopen); });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && pmId != null) pmCerrar(); });
