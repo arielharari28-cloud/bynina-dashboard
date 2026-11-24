@@ -1588,7 +1588,7 @@
             cab = cs.map(c => celeste(`${c.num ? "Corte " + focoEsc(c.num) + " · " : ""}${focoEsc(c.etapa)}${c.dias != null ? " · " + (c.dias ? c.dias + " día" + (c.dias > 1 ? "s" : "") : "hoy") : ""}`)).join(" ");
             const cort = new Map(); cs.forEach(c => c.porColor && c.porColor.forEach((o, kk) => { const v = cort.get(kk) || { co: o.co, u: 0 }; v.u += o.u; cort.set(kk, v); }));
             const falta = new Map(); g.rows.forEach(x => { const kk = lcNorm(x.co), v = falta.get(kk) || { co: x.co, u: 0 }; v.u += x.q; falta.set(kk, v); });
-            if (!cort.size) det = `<div class="text-sm text-slate-500 mt-2">Faltaban ≈ ${fmtNum(g.u)}. Todavía sin cortar: no se resta, solo queda acá para no pedirlo dos veces.</div>`;
+            if (!cort.size) det = `<div class="text-sm text-slate-500 mt-2">Faltan ≈ ${fmtNum(g.u)} · todavía sin cortar. Esto es lo que falta por color y talle, para elegir los colores de la orden:</div>${grillaRep(g, "#FCEBEB", "#A32D2D")}<div class="text-xs text-slate-400 mt-1">No se resta nada hasta que se corte; queda acá para no pedirlo dos veces.</div>`;
             else { const filas = [...falta.entries()].map(([kk, v]) => { const cu = (cort.get(kk) || {}).u || 0, d = Math.round(v.u - cu);
                 return `<tr><td class="pr-3 py-0.5 whitespace-nowrap">${focoEsc(v.co)}</td><td class="px-2 text-center">${fmtNum(Math.round(v.u))}</td><td class="px-2 text-center">${fmtNum(cu)}</td><td class="pl-3">${d > 0 ? `<span style="color:#791F1F">faltan ≈ ${fmtNum(d)}</span>` : `<span style="color:#27500A">cubre</span>`}</td></tr>`; }).join("");
               // Colores cortados que no están en lo que faltaba: si existen en Ninox para el artículo (o se marcaron como nuevos) es "también se cortó";
