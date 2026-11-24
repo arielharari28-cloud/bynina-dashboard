@@ -361,13 +361,27 @@
   // Cortes en curso, leídos de la app de fábrica.
   // De más avanzado a menos: si un código tiene varios cortes, se muestra el más cerca de entrar.
   const CORTE_ETAPAS = [["-OyK-CY2ge_5HrNA29GC", "mejora"], ["-OyJYMpvmJ3HFJv7LLk6", "revisión final"], ["fabrica_taller_terminacion", "en terminación"], ["fabrica_estampado_taller", "en estampa"], ["s6", "en taller"], ["s5", "en taller"], ["sLT", "por sacar a taller"], ["s4", "listo para taller"], ["s3", "por cortar"], ["-OyJXEFSAun4hYqJ3RDM", "pendiente tizada"]];
-  let cortesCurso = new Map();
-  db.ref("fabrica_v5/sections").once("value").then(snap => { const sec = snap.val() || {}, m = new Map();
-    CORTE_ETAPAS.forEach(([k, etapa]) => { const it = (sec[k] && sec[k].items) || {}; (Array.isArray(it) ? it : Object.values(it)).forEach(x => {
+  // Nov 2026: además del texto para Foco, guarda cada corte con su etapa, días en la etapa y lo cortado por color
+  // (capas × curva, todos los colores con la misma curva), para "Para cortar" en Reposición. Se escucha en vivo.
+  let cortesCurso = new Map(), fabSec = null, fabGrupos = {};
+  const fabCk = n => String(n == null ? "" : n).trim().replace(/[.#$\[\]\/]/g, "_");
+  function cortesCursoRecalc() {
+    if (!fabSec) return;
+    const sec = fabSec, m = new Map();
+    CORTE_ETAPAS.forEach(([k, etapa]) => { const it = (sec[k] && sec[k].items) || {}; Object.entries(it).forEach(([id, x]) => {
       if (!x || !x.code || /mini/i.test(x.marca || "") || x.es_complemento) return;
-      const c = stNorm(x.code), e = m.get(c);
-      if (e) e.n++; else m.set(c, { t: `Corte ${String(x.numero_corte || "").replace(/^Corte\s*/i, "")} · ${etapa}`, n: 1 }); }); });
-    cortesCurso = m; if (data) { renderFoco(); try { renderFam(); } catch (e) {} } }).catch(() => {});
+      const c = stNorm(x.code), e = m.get(c), num = String(x.numero_corte || "").replace(/^Corte\s*/i, "").trim();
+      const tal = x.capas_talles || [], cv = x.curva_valores || {}, sumCurva = tal.reduce((s, t) => s + (parseFloat(cv[t]) || 0), 0);
+      const g = num ? (fabGrupos[fabCk(x.numero_corte)] || {}) : {}, rollos = Object.values(g.rollos || x.rollos || {}).filter(r => r && r.color && r.capas);
+      let porColor = null;
+      if (sumCurva > 0 && rollos.length) { porColor = new Map(); rollos.forEach(r => { const kk = lcNorm(r.color), o = porColor.get(kk) || { co: r.color, u: 0 }; o.u += Math.round((parseFloat(r.capas) || 0) * sumCurva); porColor.set(kk, o); }); }
+      const ts = x.fecha_etapa || x.fecha_ingreso || 0;
+      const cc = { num, etapa, dias: ts ? Math.max(0, Math.floor((Date.now() - ts) / 864e5)) : null, porColor, dash: !!x.origen_reposicion };
+      if (e) { e.n++; e.cortes.push(cc); } else m.set(c, { t: `${num ? "Corte " + num : "Sin N° de corte"} · ${etapa}`, n: 1, cortes: [cc] }); }); });
+    cortesCurso = m; if (data) { renderFoco(); try { renderFam(); } catch (e) {} }
+  }
+  db.ref("fabrica_v5/sections").on("value", snap => { fabSec = snap.val() || {}; cortesCursoRecalc(); }, () => {});
+  db.ref("fabrica_v5/grupos_corte").on("value", snap => { fabGrupos = snap.val() || {}; cortesCursoRecalc(); }, () => {});
   const flCorte = p => { const e = cortesCurso.get(stNorm(stCodigo(p))); return !e ? "" : e.n > 1 ? `${e.t} (+${e.n - 1} más)` : e.t; };
   // Días de stock debajo de los cuales hay que reponer: 5 semanas en remeras y tops, 4 en el resto.
   const flDiasReponer = p => /^(remera|top)/i.test(flCat(p)) ? 35 : 28;
@@ -1422,8 +1436,48 @@
   //  - Para cortar: lo que falta para llegar a eso en los dos lados. "No cortar más" se marca por artículo
   //    (dashboard_nocortar/{código}). No se trae del local a fábrica: hay prendas que solo se venden en el local.
   const TR_DIAS = 14, TR_MIN = 2;
-  let trTab = "llevar", trNoCortar = {};
+  let trTab = "llevar", trNoCortar = {}, trEnCurso = {}, trAbierto = null;
   db.ref("dashboard_nocortar").on("value", s => { trNoCortar = s.val() || {}; if (data && focoVista === "transf") renderFoco(); });
+  // Nov 2026: "Ya está en curso" marcado a mano (dashboard_encurso/{código}). Se borra solo cuando la app de
+  // fábrica tiene un corte con ese código; a los TR_MANUAL_DIAS sin aparecer vuelve a "Para cortar" con aviso.
+  const TR_MANUAL_DIAS = 14;
+  db.ref("dashboard_encurso").on("value", s => { trEnCurso = s.val() || {}; if (data && focoVista === "transf") renderFoco(); });
+  // Estado de un artículo de "Para cortar": corte en la app, marca manual vigente, marca vencida o libre.
+  function trEstadoCorte(k, key) {
+    const fab = cortesCurso.get(stNorm(k)), man = trEnCurso[key];
+    if (fab) return { tipo: "app", fab, man };
+    if (man) { const dias = Math.floor((Date.now() - (man.ts || 0)) / 864e5); return { tipo: dias >= TR_MANUAL_DIAS ? "vencida" : "manual", man, dias }; }
+    return { tipo: "libre" };
+  }
+  // Mandar a Fábrica: crea el artículo en "Pendiente armar tizada" como reposición (lo ven Noelia y Peque en Mi día).
+  // No define curva ni cantidades: van los colores a priorizar y lo sugerido por color y talle solo como referencia.
+  async function trMandarFabrica(g) {
+    const sec = fabSec || (await db.ref("fabrica_v5/sections").once("value")).val() || {};
+    if (cortesCurso.get(stNorm(g.k))) { alert("Este artículo ya tiene un corte en fábrica."); return false; }
+    const destId = Object.keys(sec).find(id => sec[id] && (sec[id].title || "").trim().toLowerCase() === "pendiente armar tizada") || "-OyJXEFSAun4hYqJ3RDM";
+    let ref = null, refSec = null, refId = null, mejor = -1, perfecto = false;
+    Object.entries(sec).forEach(([sid, sc]) => { if (!sc) return; Object.entries(sc.items || {}).forEach(([iid, it]) => {
+      if (!it || it.es_complemento || stNorm(it.code) !== stNorm(g.k)) return;
+      const pri = sc.tipo === "producto_perfecto" ? 3 : sc.tipo === "mejora" && it.mejora_resuelta ? 2 : 1, sco = pri * 1e13 + (it.fecha_etapa || 0);
+      if (sco > mejor) { mejor = sco; ref = it; refSec = sid; refId = iid; perfecto = pri >= 2; } }); });
+    const avios = {}, base = Date.now();
+    Object.values((ref && ref.avios) || {}).forEach((a, i) => { if (!a || typeof a !== "object" || !(a.nombre || "").trim()) return;
+      avios["av" + base + "r" + i] = { nombre: a.nombre.trim(), proveedor: a.proveedor || "", cantidad: a.cantidad || "", precio: a.precio || "", tenido: !!a.tenido, fecha_pedido: "", fecha_llegada: null, recibido: false }; });
+    const porCol = new Map(); g.rows.forEach(x => { const o = porCol.get(x.co) || { u: 0, st: 0, t: [] }; o.u += x.q; o.st += (x.n || 0) + (x.a || 0); o.t.push([x.ta, x.q]); porCol.set(x.co, o); });
+    const colores = [...porCol.entries()].sort((a, b) => b[1].u - a[1].u).map(([co, o]) => ({ color: co, unidades: Math.round(o.u), prioridad: o.st <= 0 ? "Reponer urgente" : "Reponer pronto",
+      talles: o.t.sort((a, b) => trTalleOrd(a[0]) - trTalleOrd(b[0])).map(([t, q]) => `${t} ${Math.round(q)}`).join(" · ") }));
+    const ahora = Date.now(), r = ref || {};
+    const ni = { code: r.code || g.k, name: r.name || g.d || "", marca: r.marca || "By Nina", tela: r.tela || "", foto: r.foto || (g.p && g.p.imagen) || "",
+      ficha_link: r.ficha_link || "", control_piezas_link: r.control_piezas_link || "", en_ninox: true, base_aprobada: true, reposicion: true,
+      done: false, avios, fecha_ingreso: ahora, fecha_creado: ahora, fecha_etapa: ahora,
+      origen_reposicion: true, codigo_pendiente: false, dashboard_producto_id: (g.p && g.p.id) || null, dashboard_ts: ahora, colores_reponer: colores,
+      nota: `🔁 Reposición pedida desde el Dashboard el ${new Date(ahora).toLocaleDateString("es-AR")}` };
+    if (perfecto) Object.assign(ni, { base_ref_sec: refSec, base_ref_id: refId, reposicion_ref_sec: refSec, reposicion_ref_id: refId });
+    await db.ref(`fabrica_v5/sections/${destId}/items`).push(ni);
+    try { await db.ref("fabrica_v5/actividad").push({ user: "Ariel (Dashboard)", action: "Pidió reposición", details: `${ni.code} · ${ni.name}`, timestamp: ahora, read: false }); } catch (e) {}
+    if (trEnCurso[g.key]) db.ref("dashboard_encurso/" + g.key).remove();
+    return true;
+  }
   const stTieneDetalle = () => !!(stockActual && (stockActual.items || []).some(i => i && i.v));
   function trVentaLocal() {
     const cs = lcListaCargas().filter(c => c.id !== "legacy" && (c.items || []).some(i => i.v && i.v.length));
@@ -1499,7 +1553,11 @@
       const totCol = c => g.rows.filter(x => x.co === c).reduce((s, x) => s + x.q, 0);
       return `<table class="mt-2" style="font-size:14px;border-collapse:separate;border-spacing:4px 3px"><thead><tr><th></th>${tas.map(t => `<th class="text-slate-400 font-normal" style="min-width:44px">${focoEsc(t)}</th>`).join("")}</tr></thead><tbody>${cols.sort((a, b) => totCol(b) - totCol(a)).map(c => `<tr><td class="pr-3 whitespace-nowrap">${focoEsc(c)}</td>${tas.map(t => { const x = q.get(c + "|" + t); return `<td class="text-center">${x ? `<span class="inline-block rounded" style="background:${bg};color:${fg};min-width:40px;padding:2px 0;font-weight:500" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${fmtNum(x.q)}</span>` : ""}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`; };
     const tarjetas = inner => `<div class="grid gap-3 p-3" style="grid-template-columns:repeat(auto-fill,minmax(380px,1fr))">${inner}</div>`;
-    const llevarFilas = r.llevar, cortarFilas = r.falta.filter(x => !trNoCortar[x.key]), descartadas = new Map();
+    const llevarFilas = r.llevar, cortarTodas = r.falta.filter(x => !trNoCortar[x.key]), descartadas = new Map();
+    const est = new Map(); cortarTodas.forEach(x => { if (!est.has(x.key)) est.set(x.key, trEstadoCorte(x.k, x.key)); });
+    const cortarFilas = cortarTodas.filter(x => /libre|vencida/.test(est.get(x.key).tipo)), enCursoFilas = cortarTodas.filter(x => /app|manual/.test(est.get(x.key).tipo));
+    // Marca manual que ya no hace falta: la app de fábrica tiene el corte.
+    if (fabSec) Object.entries(trEnCurso).forEach(([key, v]) => { if (v && v.k && cortesCurso.get(stNorm(v.k))) db.ref("dashboard_encurso/" + key).remove(); });
     r.falta.filter(x => trNoCortar[x.key]).forEach(x => descartadas.set(x.key, x));
     const sum = a => a.reduce((s, x) => s + x.q, 0);
     let h = `<div class="text-xs text-slate-400">Venta de 2 semanas: local del ${fl(r.lv.desde)} al ${fl(r.lv.hasta)} y web de los últimos 15 días · stock: fábrica al momento (Tienda Nube), Avellaneda de la planilla del ${fl(stockActual.fecha)}. Al local van sus 2 semanas de venta (y al menos 1 por talle en los colores que vende) sin tocar las 2 semanas de la web. Para cortar: lo que falta para eso más 2 semanas de local de colchón en fábrica.</div>
@@ -1516,10 +1574,47 @@
       const grilla = g => { const cols = [...new Set(g.rows.map(x => x.co))], tas = [...new Set(g.rows.map(x => x.ta))].sort((a, b) => trTalleOrd(a) - trTalleOrd(b)), q = new Map(g.rows.map(x => [x.co + "|" + x.ta, x]));
         const totCol = c => g.rows.filter(x => x.co === c).reduce((s, x) => s + x.q, 0);
         return `<div class="overflow-x-auto"><table class="text-sm mt-2"><thead><tr><th></th>${tas.map(t => `<th class="px-2 text-slate-400 font-normal">${focoEsc(t)}</th>`).join("")}<th class="px-2 text-slate-400 font-normal">Total</th></tr></thead><tbody>${cols.sort((a, b) => totCol(b) - totCol(a)).map(c => `<tr><td class="pr-3 py-0.5 whitespace-nowrap">${focoEsc(c)}</td>${tas.map(t => { const x = q.get(c + "|" + t); return `<td class="px-1 py-0.5 text-center">${x ? `<span class="inline-block rounded px-2" style="background:#FCEBEB;color:#A32D2D;min-width:32px" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${fmtNum(x.q)}</span>` : `<span class="text-slate-300">—</span>`}</td>`; }).join("")}<td class="px-2 text-center font-semibold">${fmtNum(totCol(c))}</td></tr>`).join("")}</tbody></table></div>`; };
+      const azul = "background:#416096;color:#fff;border-color:#416096";
+      const accion = g => { const ab = trAbierto && trAbierto.key === g.key ? trAbierto : null, e = est.get(g.key) || {};
+        let x = e.tipo === "vencida" ? `<div class="mt-2 rounded-lg px-3 py-2 text-sm" style="background:#FAEEDA;color:#633806">Marcado a mano como en curso hace ${e.dias} días${e.man.nota ? ` (${focoEsc(e.man.nota)})` : ""} y no aparece en fábrica.
+            <div class="flex gap-2 mt-2"><button class="pill" data-trrenovar="${focoEsc(g.key)}">Sigue en curso</button><button class="pill" data-trquitar="${focoEsc(g.key)}">Quitar marca</button></div></div>` : "";
+        if (ab && ab.modo === "mandar") x += `<div class="mt-2 rounded-lg px-3 py-2 text-sm" style="background:#F1EFE8;color:#444441"><b>Se crea en Pendiente armar tizada</b> como reposición, y les aparece a Noelia y a Peque en Mi día.
+            Van el código, los colores a priorizar y lo sugerido de arriba como referencia. La curva y las capas se arman como siempre.
+            <div class="flex gap-2 mt-2"><button class="pill" style="${azul}" data-trmandarok="${focoEsc(g.key)}">Confirmar</button><button class="pill" data-trcerrar="1">Cancelar</button></div></div>`;
+        if (ab && ab.modo === "manual") x += `<div class="mt-2 rounded-lg px-3 py-2 text-sm" style="background:#F1EFE8;color:#444441">Marcar como ya en curso (por si se pidió y todavía no está en la app). Se saca sola cuando aparezca en fábrica; a los ${TR_MANUAL_DIAS} días sin aparecer te vuelve a avisar.
+            <input id="trManualNota" class="block w-full mt-2 border border-slate-300 rounded-lg px-2 py-1 text-sm" placeholder="N° de corte o nota (opcional)" style="background:#fff">
+            <div class="flex gap-2 mt-2"><button class="pill" style="${azul}" data-trmanualok="${focoEsc(g.key)}">Guardar</button><button class="pill" data-trcerrar="1">Cancelar</button></div></div>`;
+        return x; };
       h += cats.length ? cats.map((c, i) => catBox(c, tarjetas(c.arts.map(g => `<div class="border border-slate-200 rounded-xl p-3 bg-white"><div class="flex justify-between items-start gap-3">
           <div class="flex gap-3 min-w-0 ${g.p ? "cursor-pointer" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>${foto(g.p, 44)}<div class="min-w-0"><div class="font-semibold" style="font-size:16px">${focoEsc(g.d)}</div><div style="color:#9B5C6B;font-size:13px">≈ ${fmtNum(g.u)} a cortar · ${focoEsc(g.k)}</div></div></div>
-          <button class="pill flex-shrink-0" data-nocortar="${focoEsc(g.key)}" data-nocd="${focoEsc(g.d)}">No cortar más</button></div>${grillaRep(g, "#FCEBEB", "#A32D2D")}</div>`).join("")), i === 0)).join("")
-        : `<div class="card p-4 text-sm text-slate-500">No falta nada para las 2 semanas de cada lado.</div>`;
+          <div class="flex flex-wrap justify-end gap-1.5 flex-shrink-0"><button class="pill" data-nocortar="${focoEsc(g.key)}" data-nocd="${focoEsc(g.d)}">No cortar más</button><button class="pill" data-trabrir="manual" data-trk="${focoEsc(g.key)}">Ya está en curso</button><button class="pill" style="${azul}" data-trabrir="mandar" data-trk="${focoEsc(g.key)}">Mandar a Fábrica</button></div></div>${grillaRep(g, "#FCEBEB", "#A32D2D")}${accion(g)}</div>`).join("")), i === 0)).join("")
+        : `<div class="card p-4 text-sm text-slate-500">${enCursoFilas.length ? "Lo que falta ya está en fábrica (abajo)." : "No falta nada para las 2 semanas de cada lado."}</div>`;
+      // Ya en fábrica: no cortar otro. Si el corte ya se cortó, se resta por color (capas × curva).
+      const enCats = agrupar(enCursoFilas), enArts = enCats.flatMap(c => c.arts);
+      if (enArts.length) {
+        const celeste = t => `<span class="chip" style="background:#8FADC5;color:#042C53;font-size:12px">${t}</span>`;
+        const tarjEn = g => { const e = est.get(g.key) || {}; let cab = "", det = "";
+          if (e.tipo === "app") {
+            const cs = e.fab.cortes;
+            cab = cs.map(c => celeste(`${c.num ? "Corte " + focoEsc(c.num) + " · " : ""}${focoEsc(c.etapa)}${c.dias != null ? " · " + (c.dias ? c.dias + " día" + (c.dias > 1 ? "s" : "") : "hoy") : ""}`)).join(" ");
+            const cort = new Map(); cs.forEach(c => c.porColor && c.porColor.forEach((o, kk) => { const v = cort.get(kk) || { co: o.co, u: 0 }; v.u += o.u; cort.set(kk, v); }));
+            const falta = new Map(); g.rows.forEach(x => { const kk = lcNorm(x.co), v = falta.get(kk) || { co: x.co, u: 0 }; v.u += x.q; falta.set(kk, v); });
+            if (!cort.size) det = `<div class="text-sm text-slate-500 mt-2">Faltaban ≈ ${fmtNum(g.u)}. Todavía sin cortar: no se resta, solo queda acá para no pedirlo dos veces.</div>`;
+            else { const filas = [...falta.entries()].map(([kk, v]) => { const cu = (cort.get(kk) || {}).u || 0, d = Math.round(v.u - cu);
+                return `<tr><td class="pr-3 py-0.5 whitespace-nowrap">${focoEsc(v.co)}</td><td class="px-2 text-center">${fmtNum(Math.round(v.u))}</td><td class="px-2 text-center">${fmtNum(cu)}</td><td class="pl-3">${d > 0 ? `<span style="color:#791F1F">faltan ≈ ${fmtNum(d)}</span>` : `<span style="color:#27500A">cubre</span>`}</td></tr>`; }).join("");
+              const extra = [...cort.entries()].filter(([kk]) => !falta.has(kk)).map(([, v]) => `${focoEsc(v.co)} ${fmtNum(v.u)}`);
+              det = `<table class="text-sm mt-2"><thead><tr class="text-slate-400"><th></th><th class="px-2 font-normal">faltaba</th><th class="px-2 font-normal">cortado</th><th></th></tr></thead><tbody>${filas}</tbody></table>
+                ${extra.length ? `<div class="text-xs text-slate-500 mt-1">También se cortó: ${extra.join(" · ")}</div>` : ""}<div class="text-xs text-slate-400 mt-1">Cortado = capas × curva de la tiza.</div>`; }
+            if (cs.some(c => c.dash)) det += `<div class="text-xs text-slate-400 mt-1">Pedido desde el Dashboard.</div>`;
+          } else {
+            cab = `<span class="chip" style="background:#F1EFE8;color:#444441;font-size:12px">Marcado a mano · ${e.dias ? "hace " + e.dias + " día" + (e.dias > 1 ? "s" : "") : "hoy"}</span>`;
+            det = `<div class="text-sm text-slate-500 mt-2">${e.man.nota ? focoEsc(e.man.nota) + " · " : ""}Todavía no está en la app de fábrica. Si a los ${TR_MANUAL_DIAS} días no aparece, vuelve a Para cortar. <button class="underline" data-trquitar="${focoEsc(g.key)}">Quitar marca</button></div>`;
+          }
+          return `<div class="border border-slate-200 rounded-xl p-3 bg-white"><div class="flex justify-between items-start gap-3">
+            <div class="flex gap-3 min-w-0 ${g.p ? "cursor-pointer" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>${foto(g.p, 44)}<div class="min-w-0"><div class="font-semibold" style="font-size:16px">${focoEsc(g.d)}</div><div class="text-slate-500" style="font-size:13px">${focoEsc(g.k)}</div></div></div>
+            <div class="flex flex-wrap justify-end gap-1">${cab}</div></div>${det}</div>`; };
+        h += `<details class="card" open><summary class="flex justify-between items-center gap-2 px-4 py-3 cursor-pointer" style="font-size:16px"><span class="font-semibold">Ya en fábrica · no cortar otro</span><span style="color:#9B5C6B;font-size:14px">${fmtNum(enArts.length)} artículos</span></summary><div class="border-t border-slate-100">${tarjetas(enArts.map(tarjEn).join(""))}</div></details>`;
+      }
       const desc = Object.entries(trNoCortar);
       if (desc.length) h += `<div class="card p-4"><div class="font-semibold text-sm mb-2">No cortar más · ${desc.length}</div><div class="flex flex-wrap gap-2">${desc.map(([k, v]) => `<span class="chip" style="background:#F1EFE8;color:#444441;font-size:13px">${focoEsc((v && v.d) || k)} <button class="underline ml-1" data-sicortar="${focoEsc(k)}">volver a activar</button></span>`).join("")}</div></div>`;
     }
@@ -1528,6 +1623,17 @@
     const bn = cont.querySelector("#trNinox"); if (bn) bn.onclick = () => trHojaNinox(agrupar(llevarFilas), grillaRep, fl(stockActual.fecha));
     cont.querySelectorAll("[data-nocortar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_nocortar/" + b.dataset.nocortar).set({ d: b.dataset.nocd, ts: Date.now() }); });
     cont.querySelectorAll("[data-sicortar]").forEach(b => b.onclick = () => db.ref("dashboard_nocortar/" + b.dataset.sicortar).remove());
+    const artDe = key => { const rows = cortarFilas.filter(x => x.key === key); if (!rows.length) return null; const f = rows[0]; return { k: f.k, key, d: f.d, p: f.p, rows, u: rows.reduce((s, x) => s + x.q, 0) }; };
+    cont.querySelectorAll("[data-trabrir]").forEach(b => b.onclick = e => { e.stopPropagation(); trAbierto = { key: b.dataset.trk, modo: b.dataset.trabrir }; renderTransf(); });
+    cont.querySelectorAll("[data-trcerrar]").forEach(b => b.onclick = e => { e.stopPropagation(); trAbierto = null; renderTransf(); });
+    cont.querySelectorAll("[data-trmanualok]").forEach(b => b.onclick = e => { e.stopPropagation(); const g = artDe(b.dataset.trmanualok); if (!g) return;
+      const nota = ((document.getElementById("trManualNota") || {}).value || "").trim(); trAbierto = null;
+      db.ref("dashboard_encurso/" + g.key).set({ k: g.k, d: g.d, nota, ts: Date.now() }); });
+    cont.querySelectorAll("[data-trmandarok]").forEach(b => b.onclick = async e => { e.stopPropagation(); const g = artDe(b.dataset.trmandarok); if (!g) return;
+      b.disabled = true; b.textContent = "Enviando…";
+      try { await trMandarFabrica(g); trAbierto = null; renderTransf(); } catch (err) { b.disabled = false; b.textContent = "Confirmar"; alert("No se pudo mandar a Fábrica: " + err.message); } });
+    cont.querySelectorAll("[data-trrenovar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_encurso/" + b.dataset.trrenovar + "/ts").set(Date.now()); });
+    cont.querySelectorAll("[data-trquitar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_encurso/" + b.dataset.trquitar).remove(); });
   }
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
