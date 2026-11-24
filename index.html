@@ -1415,70 +1415,89 @@
   function focoGuardar() { db.ref("dashboard_foco").update({ categorias: focoCats, periodo: focoPeriodo }); }
   const focoEsc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const FOCO_MODOS = [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["tn", "Tienda Nube (anterior)"]];
-  // Transferencias (reglas de Ariel, nov 2026), por color y talle:
+  // Reposición (reglas de Ariel, nov 2026), por color y talle:
   //  - El local tiene que tener como máximo 2 semanas de su venta.
   //  - Fábrica (= web) tiene que guardar 2 semanas de web + 2 semanas de local.
   //  - Llevar al local: le falta para sus 2 semanas y a fábrica le sobra por encima de lo que guarda.
-  //  - Traer a fábrica: el local tiene más de sus 2 semanas y a fábrica le falta.
-  //  - Falta en los dos: aunque se mueva, no alcanza → hay que cortar. Movimientos de 1 prenda no se muestran.
+  //  - Para cortar: lo que falta para llegar a eso en los dos lados. "No cortar más" se marca por artículo
+  //    (dashboard_nocortar/{código}). No se trae del local a fábrica: hay prendas que solo se venden en el local.
   const TR_DIAS = 14, TR_MIN = 2;
+  let trTab = "llevar", trNoCortar = {};
+  db.ref("dashboard_nocortar").on("value", s => { trNoCortar = s.val() || {}; if (data && focoVista === "transf") renderFoco(); });
   const stTieneDetalle = () => !!(stockActual && (stockActual.items || []).some(i => i && i.v));
   function trVentaLocal() {
-    // Ventas del local por código → "color|talle" → unidades, llevadas a 14 días con las cargas más recientes.
     const cs = lcListaCargas().filter(c => c.id !== "legacy" && (c.items || []).some(i => i.v && i.v.length));
     if (!cs.length) return null;
     const fin = cs[0].hasta, ini = new Date(new Date(fin) - (TR_DIAS - 1) * 86400000).toISOString().slice(0, 10), us = [];
     cs.forEach(c => { if (c.hasta >= ini && !us.some(u => !(c.hasta < u.desde || c.desde > u.hasta))) us.push(c); });
-    const dias = us.reduce((x, c) => x + lcDiasRango(c.desde, c.hasta), 0) || TR_DIAS, f = TR_DIAS / dias, m = new Map();
+    const dias = us.reduce((x, c) => x + lcDiasRango(c.desde, c.hasta), 0) || TR_DIAS, f = TR_DIAS / dias, m = new Map(), nombres = new Map();
     us.forEach(c => (c.items || []).forEach(it => { const k = stNorm(it.k), e = m.get(k) || new Map();
-      (it.v || []).forEach(([cv, u]) => { const [co, ta] = String(cv).split("|"), kk = lcNorm(co) + "|" + lcNorm(ta); e.set(kk, (e.get(kk) || 0) + (u || 0) * f); }); m.set(k, e); }));
-    return { m, desde: us.map(c => c.desde).sort()[0], hasta: fin };
+      (it.v || []).forEach(([cv, u]) => { const [co, ta] = String(cv).split("|"), kk = lcNorm(co) + "|" + lcNorm(ta); e.set(kk, (e.get(kk) || 0) + (u || 0) * f); if (!nombres.has(kk)) nombres.set(kk, [co, ta]); }); m.set(k, e); }));
+    return { m, nombres, desde: us.map(c => c.desde).sort()[0], hasta: fin };
   }
+  const trCat = p => { const c = p && clDe(p); return c && c.base ? c.base : p ? "Sin clasificar" : "Sin cruzar con la web"; };
   function stTransferencias() {
-    const lv = trVentaLocal(), r = { llevar: [], traer: [], falta: [], lv };
+    const lv = trVentaLocal(), r = { llevar: [], falta: [], lv };
     if (!lv) return r;
     const porCod = new Map(); (data.productos || []).forEach(p => { const it = stItem(p); if (it && !porCod.has(stNorm(it.k))) porCod.set(stNorm(it.k), p); });
     (stockActual.items || []).forEach(it => { if (!it || !it.v) return;
       const k = stNorm(it.k), p = porCod.get(k), loc = lv.m.get(k) || new Map(), combos = new Map();
       it.v.forEach(([co, ta, n, a]) => combos.set(lcNorm(co) + "|" + lcNorm(ta), { co, ta, n: n || 0, a: a || 0 }));
-      loc.forEach((u, kk) => { if (!combos.has(kk)) { const [co, ta] = kk.split("|"); combos.set(kk, { co, ta, n: 0, a: 0 }); } });
+      loc.forEach((u, kk) => { if (!combos.has(kk)) { const [co, ta] = lv.nombres.get(kk) || kk.split("|"); combos.set(kk, { co, ta, n: 0, a: 0 }); } });
       const web = new Map(); if (p) { const vv = ((p.ventasPorPeriodo || {})["15dias"] || {}).variantesVendidas || [];
         vv.forEach(v => web.set(lcNorm(v.color || "Único") + "|" + lcNorm(v.talle || "Único"), (v.unidades || 0) * TR_DIAS / 15)); }
+      const cat = trCat(p), d = p ? p.producto : it.d;
       combos.forEach((c, kk) => {
-        // Fábrica: stock de Tienda Nube al momento si el producto está cruzado; si no, la planilla.
-        if (p) { const v = (p.variantes || []).find(x => lcNorm(x.color || "Único") + "|" + lcNorm(x.talle || "Único") === kk); if (v) c.n = v.stock || 0; }
+        if (p) { const v = (p.variantes || []).find(x => lcNorm(x.color || "Único") + "|" + lcNorm(x.talle || "Único") === kk); if (v) { c.n = v.stock || 0; c.co = v.color || c.co; c.ta = v.talle || c.ta; } }
         const L = Math.round(loc.get(kk) || 0), W = Math.round(web.get(kk) || 0), guarda = W + L;
         if (!L && !W) return;
         let n = c.n, a = c.a;
-        const fila = q => ({ k: it.k, d: p ? p.producto : it.d, p, co: c.co, ta: c.ta, q, L, W, n: c.n, a: c.a });
+        const fila = q => ({ k: it.k, key: lcKey(k), d, p, cat, co: c.co, ta: c.ta, q, L, W, n: c.n, a: c.a });
         const qLl = Math.min(L - a, n - guarda); if (qLl >= TR_MIN) { r.llevar.push(fila(qLl)); n -= qLl; a += qLl; }
-        const qTr = Math.min(a - L, guarda - n); if (qTr >= TR_MIN) { r.traer.push(fila(qTr)); n += qTr; a -= qTr; }
         const fal = Math.max(0, L - a) + Math.max(0, guarda - n); if (fal >= TR_MIN) r.falta.push(fila(fal));
       });
     });
     return r;
   }
+  const TALLES_ORD = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL", "UNICO", "ÚNICO"];
+  const trTalleOrd = t => { const i = TALLES_ORD.indexOf(String(t).toUpperCase()); return i < 0 ? 50 : i; };
   function renderTransf() {
     const cont = document.getElementById("focoLista"), r = stTransferencias();
     document.getElementById("focoLeyenda").textContent = "";
-    if (!r.lv) { cont.innerHTML = `<div class="card p-4 text-sm text-slate-500">Para calcular las transferencias hace falta una carga de ventas del local con color y talle (Ranking de artículos).</div>`; return; }
+    if (!r.lv) { cont.innerHTML = `<div class="card p-4 text-sm text-slate-500">Para calcular la reposición hace falta una carga de ventas del local con color y talle (Ranking de artículos).</div>`; return; }
     const fl = x => x.split("-").reverse().slice(0, 2).join("/");
-    const bloque = (titulo, sub, filas, bg, fg) => {
-      const por = new Map(); filas.forEach(x => { const g = por.get(x.k) || { k: x.k, d: x.d, p: x.p, u: 0, rows: [] }; g.u += x.q; g.rows.push(x); por.set(x.k, g); });
-      const gs = [...por.values()].sort((a, b) => b.u - a.u);
-      return `<div class="space-y-2"><div class="flex items-baseline justify-between gap-2"><div class="font-bold text-sm">${titulo}</div><div class="text-xs" style="color:#9B5C6B">${fmtNum(filas.reduce((s, x) => s + x.q, 0))} prendas · ${fmtNum(gs.length)} artículos</div></div>
-        <div class="text-[11px] text-slate-400">${sub}</div>
-        ${gs.length ? `<div class="card divide-y divide-slate-100">${gs.map(g => `<div class="flex gap-3 p-3 ${g.p ? "cursor-pointer hover:bg-slate-50" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>
-          ${g.p && g.p.imagen ? `<img src="${focoEsc(g.p.imagen)}" class="w-10 aspect-[3/4] object-cover rounded bg-slate-100" loading="lazy">` : `<div class="w-10 aspect-[3/4] rounded bg-slate-100"></div>`}
-          <div class="min-w-0"><div class="font-semibold text-sm">${focoEsc(g.d)} <span class="font-normal" style="color:#9B5C6B">${fmtNum(g.u)} u.</span></div>
-            <div class="text-[11px] text-slate-400">${focoEsc(g.k)}</div>
-            <div class="flex flex-wrap gap-1 mt-1.5">${g.rows.map(x => `<span class="chip" style="background:${bg};color:${fg}" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${focoEsc(x.co)} ${focoEsc(x.ta)} · ${fmtNum(x.q)}</span>`).join("")}</div></div></div>`).join("")}</div>`
-          : `<div class="card p-3 text-xs text-slate-400">Nada por ahora.</div>`}</div>`;
-    };
-    cont.innerHTML = `<div class="text-[11px] text-slate-400">Venta de 2 semanas: local del ${fl(r.lv.desde)} al ${fl(r.lv.hasta)} y web de los últimos 15 días · stock: fábrica al momento (Tienda Nube), Avellaneda de la planilla del ${fl(stockActual.fecha)}. El local tiene que tener 2 semanas de su venta; fábrica guarda 2 semanas de web + 2 de local.</div>
-      ${bloque("Llevar al local", "Al local le falta para sus 2 semanas y a fábrica le sobra.", r.llevar, "#E6F1FB", "#0C447C")}
-      ${bloque("Traer a fábrica", "El local tiene más de sus 2 semanas y a fábrica le falta.", r.traer, "#EAF3DE", "#27500A")}
-      ${bloque("Falta en los dos · hay que cortar", "Aunque se mueva, no alcanza para las 2 semanas de cada lado. El número es lo que falta.", r.falta, "#FCEBEB", "#A32D2D")}`;
+    const foto = (p, w) => p && p.imagen ? `<img src="${focoEsc(p.imagen)}" class="aspect-[3/4] object-cover rounded bg-slate-100 flex-shrink-0" style="width:${w}px" loading="lazy">` : `<div class="aspect-[3/4] rounded bg-slate-100 flex-shrink-0" style="width:${w}px"></div>`;
+    const agrupar = filas => { const art = new Map(); filas.forEach(x => { const g = art.get(x.k) || { k: x.k, key: x.key, d: x.d, p: x.p, cat: x.cat, u: 0, rows: [] }; g.u += x.q; g.rows.push(x); art.set(x.k, g); });
+      const cats = new Map(); [...art.values()].forEach(g => { const c = cats.get(g.cat) || { cat: g.cat, u: 0, arts: [] }; c.u += g.u; c.arts.push(g); cats.set(g.cat, c); });
+      return [...cats.values()].sort((a, b) => b.u - a.u).map(c => ({ ...c, arts: c.arts.sort((a, b) => b.u - a.u) })); };
+    const catBox = (c, inner, abierta) => `<details class="card" ${abierta ? "open" : ""}><summary class="flex justify-between items-center gap-2 px-4 py-3 cursor-pointer" style="font-size:16px"><span class="font-semibold">${focoEsc(c.cat)}</span><span style="color:#9B5C6B;font-size:14px">${fmtNum(c.u)} prendas · ${fmtNum(c.arts.length)} artículos</span></summary><div class="divide-y divide-slate-100 border-t border-slate-100">${inner}</div></details>`;
+    const llevarFilas = r.llevar, cortarFilas = r.falta.filter(x => !trNoCortar[x.key]), descartadas = new Map();
+    r.falta.filter(x => trNoCortar[x.key]).forEach(x => descartadas.set(x.key, x));
+    const sum = a => a.reduce((s, x) => s + x.q, 0);
+    let h = `<div class="text-xs text-slate-400">Venta de 2 semanas: local del ${fl(r.lv.desde)} al ${fl(r.lv.hasta)} y web de los últimos 15 días · stock: fábrica al momento (Tienda Nube), Avellaneda de la planilla del ${fl(stockActual.fecha)}. El local tiene 2 semanas de su venta; fábrica guarda 2 semanas de web + 2 de local.</div>
+      <div class="flex gap-6 border-b border-slate-200" style="font-size:16px">${[["llevar", "Llevar al local", sum(llevarFilas)], ["cortar", "Para cortar", sum(cortarFilas)]].map(([k, l, u]) => `<button data-trtab="${k}" class="py-2 ${trTab === k ? "font-semibold" : "text-slate-500"}" style="${trTab === k ? "border-bottom:2px solid #416096" : ""}">${l} · ${fmtNum(u)}</button>`).join("")}</div>`;
+    if (trTab === "llevar") {
+      const cats = agrupar(llevarFilas);
+      h += cats.length ? cats.map((c, i) => catBox(c, c.arts.map(g => `<div class="flex gap-3 px-4 py-3 ${g.p ? "cursor-pointer hover:bg-slate-50" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>${foto(g.p, 48)}
+          <div class="min-w-0"><div class="font-semibold" style="font-size:15px">${focoEsc(g.d)} <span class="font-normal" style="color:#9B5C6B">${fmtNum(g.u)} u.</span></div>
+          <div class="flex flex-wrap gap-1.5 mt-2">${g.rows.sort((a, b) => b.q - a.q).map(x => `<span class="chip" style="background:#E6F1FB;color:#0C447C;font-size:13px;padding:4px 10px" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${focoEsc(x.co)} ${focoEsc(x.ta)} · ${fmtNum(x.q)}</span>`).join("")}</div></div></div>`).join(""), i === 0)).join("")
+        : `<div class="card p-4 text-sm text-slate-500">Nada para llevar: el local tiene lo de sus 2 semanas o fábrica no tiene de más.</div>`;
+    } else {
+      const cats = agrupar(cortarFilas);
+      const grilla = g => { const cols = [...new Set(g.rows.map(x => x.co))], tas = [...new Set(g.rows.map(x => x.ta))].sort((a, b) => trTalleOrd(a) - trTalleOrd(b)), q = new Map(g.rows.map(x => [x.co + "|" + x.ta, x]));
+        const totCol = c => g.rows.filter(x => x.co === c).reduce((s, x) => s + x.q, 0);
+        return `<div class="overflow-x-auto"><table class="text-sm mt-2"><thead><tr><th></th>${tas.map(t => `<th class="px-2 text-slate-400 font-normal">${focoEsc(t)}</th>`).join("")}<th class="px-2 text-slate-400 font-normal">Total</th></tr></thead><tbody>${cols.sort((a, b) => totCol(b) - totCol(a)).map(c => `<tr><td class="pr-3 py-0.5 whitespace-nowrap">${focoEsc(c)}</td>${tas.map(t => { const x = q.get(c + "|" + t); return `<td class="px-1 py-0.5 text-center">${x ? `<span class="inline-block rounded px-2" style="background:#FCEBEB;color:#A32D2D;min-width:32px" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${fmtNum(x.q)}</span>` : `<span class="text-slate-300">—</span>`}</td>`; }).join("")}<td class="px-2 text-center font-semibold">${fmtNum(totCol(c))}</td></tr>`).join("")}</tbody></table></div>`; };
+      h += cats.length ? cats.map((c, i) => catBox(c, c.arts.map(g => `<div class="px-4 py-3"><div class="flex justify-between items-start gap-3">
+          <div class="flex gap-3 min-w-0 ${g.p ? "cursor-pointer" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>${foto(g.p, 40)}<div class="min-w-0"><div class="font-semibold" style="font-size:15px">${focoEsc(g.d)} <span class="font-normal" style="color:#9B5C6B">≈ ${fmtNum(g.u)} u.</span></div><div class="text-xs text-slate-400">${focoEsc(g.k)}</div></div></div>
+          <button class="pill flex-shrink-0" data-nocortar="${focoEsc(g.key)}" data-nocd="${focoEsc(g.d)}">No cortar más</button></div>${grilla(g)}</div>`).join(""), i === 0)).join("")
+        : `<div class="card p-4 text-sm text-slate-500">No falta nada para las 2 semanas de cada lado.</div>`;
+      const desc = Object.entries(trNoCortar);
+      if (desc.length) h += `<div class="card p-4"><div class="font-semibold text-sm mb-2">No cortar más · ${desc.length}</div><div class="flex flex-wrap gap-2">${desc.map(([k, v]) => `<span class="chip" style="background:#F1EFE8;color:#444441;font-size:13px">${focoEsc((v && v.d) || k)} <button class="underline ml-1" data-sicortar="${focoEsc(k)}">volver a activar</button></span>`).join("")}</div></div>`;
+    }
+    cont.innerHTML = h;
+    cont.querySelectorAll("[data-trtab]").forEach(b => b.onclick = () => { trTab = b.dataset.trtab; renderTransf(); });
+    cont.querySelectorAll("[data-nocortar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_nocortar/" + b.dataset.nocortar).set({ d: b.dataset.nocd, ts: Date.now() }); });
+    cont.querySelectorAll("[data-sicortar]").forEach(b => b.onclick = () => db.ref("dashboard_nocortar/" + b.dataset.sicortar).remove());
   }
   function renderFoco() {
     if (!document.getElementById("focoLista") || !data) return;
@@ -1491,10 +1510,15 @@
     const modos = esLista ? [["grupo", "Grupo"], ["tendencia", "Tendencia"], ["categoria", "Categoría"], ["ingreso", "Último ingreso"]] : FOCO_MODOS;
     const ordenes = esLista ? [["estado", "Estado"], ...FOCO_ORDENES] : FOCO_ORDENES;
     if (!esLista && focoOrden === "estado") focoOrden = "vend";
-    document.getElementById("focoModoBar").innerHTML = `<span class="w-full flex flex-wrap gap-1.5 items-center mb-1"><span class="text-xs text-slate-500 font-medium">Vista:</span>${[["lista", "☰ Lista"], ["tarjetas", "▦ Tarjetas"], ...(stTieneDetalle() ? [["transf", "⇄ Transferencias"]] : [])].map(([k, l]) => `<button class="pill ${focoVista === k ? "active" : ""}" data-fvista="${k}">${l}</button>`).join("")}</span><span class="text-xs text-slate-500 font-medium">Ver por:</span>${modos.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}`
-      + (focoModo !== "tn" ? `<label class="text-xs text-slate-600 flex items-center gap-1 ml-2"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "")
-      + (focoModo !== "tn" && focoModo !== "ingreso" ? `<span class="w-full md:w-auto md:ml-3 flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar por:</span>${ordenes.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "")
-      + (focoModo !== "tn" ? `<span class="w-full flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de:</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>${localBarra()}` : "");
+    const VISTAS = [["lista", "Artículos"], ...(stTieneDetalle() ? [["transf", "Reposición"]] : []), ["tarjetas", "Tarjetas"]];
+    const enRepo = focoVista === "transf";
+    document.getElementById("focoModoBar").innerHTML = `<div class="w-full flex flex-wrap gap-2 mb-2">${VISTAS.map(([k, l]) => `<button class="pill ${focoVista === k ? "active" : ""}" style="font-size:15px;padding:8px 18px" data-fvista="${k}">${l}</button>`).join("")}</div>`
+      + (enRepo ? localBarra() : `<div class="w-full flex flex-wrap gap-x-4 gap-y-1.5 items-center text-sm">`
+        + `<span class="flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ver por</span>${modos.map(([k, l]) => `<button class="pill ${focoModo === k ? "active" : ""}" data-fmodo="${k}">${l}</button>`).join("")}</span>`
+        + (focoModo !== "tn" && focoModo !== "ingreso" ? `<span class="flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ordenar</span>${ordenes.map(([k, l]) => `<button class="pill ${focoOrden === k ? "active" : ""}" data-forden="${k}">${l}</button>`).join("")}</span>` : "")
+        + (focoModo !== "tn" ? `<span class="flex flex-wrap gap-1.5 items-center"><span class="text-xs text-slate-500 font-medium">Ventas de</span>${FOCO_CANALES.map(([k, l]) => `<button class="pill ${focoCanal === k ? "active" : ""}" data-fcanal="${k}">${l}</button>`).join("")}</span>`
+          + `<label class="text-xs text-slate-600 flex items-center gap-1"><input type="checkbox" id="focoOcSin" ${focoOcultarSin ? "checked" : ""}> Ocultar sin stock</label>` : "")
+        + `</div>${focoModo !== "tn" ? localBarra() : ""}`);
     document.querySelectorAll("[data-fmodo]").forEach(b => b.onclick = () => { focoModo = b.dataset.fmodo; db.ref("dashboard_foco/modo").set(focoModo); renderFoco(); });
     document.querySelectorAll("[data-fvista]").forEach(b => b.onclick = () => { focoVista = b.dataset.fvista; db.ref("dashboard_foco/vista").set(focoVista); renderFoco(); });
     document.querySelectorAll("[data-forden]").forEach(b => b.onclick = () => { focoOrden = b.dataset.forden; db.ref("dashboard_foco/orden").set(focoOrden); renderFoco(); });
@@ -1505,7 +1529,8 @@
     document.getElementById("focoLeyenda").textContent = focoModo === "tn"
       ? "En rojo: mucho stock y casi sin ventas en el período (para empujar). En naranja: se vende y queda poco (para reponer)."
       : `Sin stock: en rojo. Reponer (se vende y queda poco): en naranja. Empujar: ${FOCO_EMPUJAR_DIAS} días de stock o más al ritmo de venta del período elegido (web, local o las dos, según "Ventas de"). Reponer mira solo la web: se vende online y queda poco cargado. El local se lleva al período como promedio diario del reporte cargado. Sin ventas: tiene stock y no vendió nada en el período (no se marcan los que entraron hace menos de ${CL_NEWIN_DIAS} días). Los productos sin clasificar o rechazados no aparecen acá.`;
-    if (focoVista === "transf") { document.getElementById("focoCats").style.display = "none"; renderTransf(); return; }
+    if (focoVista === "transf") { document.getElementById("focoCats").style.display = "none"; const fpr = document.getElementById("focoPeriodo"); if (fpr && fpr.parentElement) fpr.parentElement.style.display = "none"; renderTransf(); return; }
+    { const fpr = document.getElementById("focoPeriodo"); if (fpr && fpr.parentElement) fpr.parentElement.style.display = ""; }
     if (focoModo !== "tn") {
       document.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => { focoPeriodo = b.dataset.fp; focoGuardar(); renderFoco(); });
       if (esLista) { document.getElementById("focoLeyenda").textContent = `Estados — Reponer: vende, le queda menos de 5 semanas de stock en remeras y tops o 4 en el resto, y no tiene corte en curso. Destrabar: igual que Reponer o sin stock, pero ya hay un corte en la fábrica: hay que acelerarlo, no cortar otro. OK: desde ese límite hasta ${FL_EMPUJAR} días. Empujar: ${FL_EMPUJAR} a ${FL_CLAVADO} días. Clavado: más de ${FL_CLAVADO} días o sin ventas en el período. Nuevo: ingresó hace ${CL_NEWIN_DIAS} días o menos (no se marca Empujar ni Clavado). Reingreso: igual que Nuevo, pero de un producto que ya estaba en la web (volvió a entrar mercadería). Días de stock = stock (Nina + Avellaneda; lo que no está en la planilla cuenta 0 en Avellaneda) ÷ venta diaria del período (web, local o las dos según "Ventas de"). Solo aparecen los artículos clasificados y no rechazados. Último ingreso: cierre del control en Logística de Fábrica (cortes y prendas de proveedor), cruzado por código con el inicio del SKU; si no hay, la fecha de alta en Tienda Nube. ⭐ = top ${CL_TOP} más vendidos de 30 días.`; renderFocoLista(); return; }
