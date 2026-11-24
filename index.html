@@ -1468,6 +1468,23 @@
   }
   const TALLES_ORD = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL", "UNICO", "ÚNICO"];
   const trTalleOrd = t => { const i = TALLES_ORD.indexOf(String(t).toUpperCase()); return i < 0 ? 50 : i; };
+  // Hoja grande para cargar la transferencia en Ninox: una grilla por artículo, se puede imprimir o guardar en PDF.
+  function trHojaNinox(cats, grillaRep, fechaStock) {
+    const w = window.open("", "_blank"); if (!w) return;
+    const tot = cats.reduce((s, c) => s + c.u, 0), n = cats.reduce((s, c) => s + c.arts.length, 0);
+    const card = g => `<div class="c"><div class="h"><b>${focoEsc(g.d)}</b><span>${fmtNum(g.u)} prendas · ${focoEsc(g.k)}</span></div>${grillaRep(g, "#E6F1FB", "#0C447C")}</div>`;
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Transferencia fábrica → local</title><style>
+      body{font-family:Inter,system-ui,sans-serif;margin:0;color:#191919} .top{background:#3F2A2F;color:#fff;padding:12px 24px;font-size:13px;letter-spacing:1px;display:flex;justify-content:space-between;align-items:center}
+      .top button{background:#416096;color:#fff;border:0;border-radius:40px;padding:8px 18px;font-size:14px;cursor:pointer} main{padding:16px 24px} h1{font-family:Poppins,sans-serif;margin:4px 0} .sub{color:#555;margin-bottom:12px}
+      h2{font-family:Poppins,sans-serif;color:#3F2A2F;font-size:20px;border-bottom:2px solid #eee;padding-bottom:6px;margin:22px 0 10px} h2 span{color:#9B5C6B;font-size:14px;font-weight:400;margin-left:8px}
+      .g{display:grid;grid-template-columns:repeat(auto-fill,minmax(400px,1fr));gap:12px} .c{border:1px solid #e3e3e3;border-radius:12px;padding:12px;break-inside:avoid} .h b{font-size:17px;display:block} .h span{color:#9B5C6B;font-size:13px}
+      table{font-size:15px} th{color:#999;font-weight:400} .text-center{text-align:center} .inline-block{display:inline-block} .rounded{border-radius:6px} .pr-3{padding-right:12px} .whitespace-nowrap{white-space:nowrap} .mt-2{margin-top:8px}
+      @media print{.top button{display:none} .top{-webkit-print-color-adjust:exact;print-color-adjust:exact} span.inline-block{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+      </style></head><body><div class="top"><span>TRANSFERENCIA FÁBRICA → LOCAL AVELLANEDA</span><button onclick="print()">Imprimir / guardar PDF</button></div><main>
+      <h1>Llevar al local</h1><div class="sub">${fmtNum(tot)} prendas · ${n} artículos · cada número = prendas a llevar · stock del local de la planilla del ${fechaStock}</div>
+      ${cats.map(c => `<h2>${focoEsc(c.cat)}<span>${fmtNum(c.u)} prendas</span></h2><div class="g">${c.arts.map(card).join("")}</div>`).join("")}</main></body></html>`);
+    w.document.close();
+  }
   function renderTransf() {
     const cont = document.getElementById("focoLista"), r = stTransferencias();
     document.getElementById("focoLeyenda").textContent = "";
@@ -1477,7 +1494,7 @@
     const agrupar = filas => { const art = new Map(); filas.forEach(x => { const g = art.get(x.k) || { k: x.k, key: x.key, d: x.d, p: x.p, cat: x.cat, u: 0, rows: [] }; g.u += x.q; g.rows.push(x); art.set(x.k, g); });
       const cats = new Map(); [...art.values()].forEach(g => { const c = cats.get(g.cat) || { cat: g.cat, u: 0, arts: [] }; c.u += g.u; c.arts.push(g); cats.set(g.cat, c); });
       return [...cats.values()].sort((a, b) => b.u - a.u).map(c => ({ ...c, arts: c.arts.sort((a, b) => b.u - a.u) })); };
-    const catBox = (c, inner, abierta) => `<details class="card" ${abierta ? "open" : ""}><summary class="flex justify-between items-center gap-2 px-4 py-3 cursor-pointer" style="font-size:16px"><span class="font-semibold">${focoEsc(c.cat)}</span><span style="color:#9B5C6B;font-size:14px">${fmtNum(c.u)} prendas · ${fmtNum(c.arts.length)} artículos</span></summary><div class="border-t border-slate-100">${inner}</div></details>`;
+    const catBox = (c, inner, abierta) => `<details class="card" ${abierta ? "open" : ""}><summary class="flex justify-between items-center gap-2 px-4 py-3 cursor-pointer" style="font-size:16px"><span class="font-semibold">${focoEsc(c.cat)}</span><span style="color:#9B5C6B;font-size:14px">${fmtNum(c.u)} prendas · ${fmtNum(c.arts.length)} artículos</span></summary><div class="divide-y divide-slate-100 border-t border-slate-100">${inner}</div></details>`;
     const grillaRep = (g, bg, fg) => { const cols = [...new Set(g.rows.map(x => x.co))], tas = [...new Set(g.rows.map(x => x.ta))].sort((a, b) => trTalleOrd(a) - trTalleOrd(b)), q = new Map(g.rows.map(x => [x.co + "|" + x.ta, x]));
       const totCol = c => g.rows.filter(x => x.co === c).reduce((s, x) => s + x.q, 0);
       return `<table class="mt-2" style="font-size:14px;border-collapse:separate;border-spacing:4px 3px"><thead><tr><th></th>${tas.map(t => `<th class="text-slate-400 font-normal" style="min-width:44px">${focoEsc(t)}</th>`).join("")}</tr></thead><tbody>${cols.sort((a, b) => totCol(b) - totCol(a)).map(c => `<tr><td class="pr-3 whitespace-nowrap">${focoEsc(c)}</td>${tas.map(t => { const x = q.get(c + "|" + t); return `<td class="text-center">${x ? `<span class="inline-block rounded" style="background:${bg};color:${fg};min-width:40px;padding:2px 0;font-weight:500" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${fmtNum(x.q)}</span>` : ""}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`; };
@@ -1489,9 +1506,10 @@
       <div class="flex gap-6 border-b border-slate-200" style="font-size:16px">${[["llevar", "Llevar al local", sum(llevarFilas)], ["cortar", "Para cortar", sum(cortarFilas)]].map(([k, l, u]) => `<button data-trtab="${k}" class="py-2 ${trTab === k ? "font-semibold" : "text-slate-500"}" style="${trTab === k ? "border-bottom:2px solid #416096" : ""}">${l} · ${fmtNum(u)}</button>`).join("")}</div>`;
     if (trTab === "llevar") {
       const cats = agrupar(llevarFilas);
-      h += cats.length ? cats.map((c, i) => catBox(c, tarjetas(c.arts.map(g => `<div class="border border-slate-200 rounded-xl p-3 bg-white">
-          <div class="flex gap-3 ${g.p ? "cursor-pointer" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>${foto(g.p, 44)}<div class="min-w-0"><div class="font-semibold" style="font-size:16px">${focoEsc(g.d)}</div><div style="color:#9B5C6B;font-size:13px">${fmtNum(g.u)} prendas · ${focoEsc(g.k)}</div></div></div>
-          ${grillaRep(g, "#E6F1FB", "#0C447C")}</div>`).join("")), i === 0)).join("")
+      h += cats.length ? `<div class="flex justify-end"><button class="pill active" id="trNinox" style="font-size:14px;padding:8px 16px">Ver para hacer la transferencia en Ninox</button></div>` : "";
+      h += cats.length ? cats.map((c, i) => catBox(c, c.arts.map(g => `<div class="flex gap-3 px-4 py-3 ${g.p ? "cursor-pointer hover:bg-slate-50" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>${foto(g.p, 48)}
+          <div class="min-w-0"><div class="font-semibold" style="font-size:15px">${focoEsc(g.d)} <span class="font-normal" style="color:#9B5C6B">${fmtNum(g.u)} u.</span></div>
+          <div class="flex flex-wrap gap-1.5 mt-2">${g.rows.sort((a, b) => b.q - a.q).map(x => `<span class="chip" style="background:#E6F1FB;color:#0C447C;font-size:13px;padding:4px 10px" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${focoEsc(x.co)} ${focoEsc(x.ta)} · ${fmtNum(x.q)}</span>`).join("")}</div></div></div>`).join(""), i === 0)).join("")
         : `<div class="card p-4 text-sm text-slate-500">Nada para llevar: el local tiene lo de sus 2 semanas o fábrica no tiene de más.</div>`;
     } else {
       const cats = agrupar(cortarFilas);
@@ -1507,6 +1525,7 @@
     }
     cont.innerHTML = h;
     cont.querySelectorAll("[data-trtab]").forEach(b => b.onclick = () => { trTab = b.dataset.trtab; renderTransf(); });
+    const bn = cont.querySelector("#trNinox"); if (bn) bn.onclick = () => trHojaNinox(agrupar(llevarFilas), grillaRep, fl(stockActual.fecha));
     cont.querySelectorAll("[data-nocortar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_nocortar/" + b.dataset.nocortar).set({ d: b.dataset.nocd, ts: Date.now() }); });
     cont.querySelectorAll("[data-sicortar]").forEach(b => b.onclick = () => db.ref("dashboard_nocortar/" + b.dataset.sicortar).remove());
   }
