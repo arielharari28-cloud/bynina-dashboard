@@ -1457,7 +1457,8 @@
         if (!objLocal && !W) return;
         let n = c.n, a = c.a;
         const fila = q => ({ k: it.k, key: lcKey(k), d, p, cat, co: c.co, ta: c.ta, q, L, W, n: c.n, a: c.a });
-        const qLl = Math.min(objLocal - a, n - guarda); if (qLl >= 1) { llevarArt.push(fila(qLl)); n -= qLl; a += qLl; }
+        // Al local va lo que le falta, sin tocar las 2 semanas de la web. El colchón de fábrica (2 semanas de local) lo cubre el corte.
+        const qLl = Math.min(objLocal - a, n - W); if (qLl >= 1) { llevarArt.push(fila(qLl)); n -= qLl; a += qLl; }
         const fal = Math.max(0, L - a) + Math.max(0, guarda - n); if (fal >= TR_MIN) r.falta.push(fila(fal));
       });
       // Movimientos chicos: se muestra el artículo si en total lleva 2 o más.
@@ -1480,7 +1481,7 @@
     const llevarFilas = r.llevar, cortarFilas = r.falta.filter(x => !trNoCortar[x.key]), descartadas = new Map();
     r.falta.filter(x => trNoCortar[x.key]).forEach(x => descartadas.set(x.key, x));
     const sum = a => a.reduce((s, x) => s + x.q, 0);
-    let h = `<div class="text-xs text-slate-400">Venta de 2 semanas: local del ${fl(r.lv.desde)} al ${fl(r.lv.hasta)} y web de los últimos 15 días · stock: fábrica al momento (Tienda Nube), Avellaneda de la planilla del ${fl(stockActual.fecha)}. El local tiene 2 semanas de su venta (y al menos 1 por talle en los colores que vende); fábrica guarda 2 semanas de web + 2 de local.</div>
+    let h = `<div class="text-xs text-slate-400">Venta de 2 semanas: local del ${fl(r.lv.desde)} al ${fl(r.lv.hasta)} y web de los últimos 15 días · stock: fábrica al momento (Tienda Nube), Avellaneda de la planilla del ${fl(stockActual.fecha)}. Al local van sus 2 semanas de venta (y al menos 1 por talle en los colores que vende) sin tocar las 2 semanas de la web. Para cortar: lo que falta para eso más 2 semanas de local de colchón en fábrica.</div>
       <div class="flex gap-6 border-b border-slate-200" style="font-size:16px">${[["llevar", "Llevar al local", sum(llevarFilas)], ["cortar", "Para cortar", sum(cortarFilas)]].map(([k, l, u]) => `<button data-trtab="${k}" class="py-2 ${trTab === k ? "font-semibold" : "text-slate-500"}" style="${trTab === k ? "border-bottom:2px solid #416096" : ""}">${l} · ${fmtNum(u)}</button>`).join("")}</div>`;
     if (trTab === "llevar") {
       const cats = agrupar(llevarFilas);
