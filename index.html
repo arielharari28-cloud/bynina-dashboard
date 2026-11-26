@@ -1548,12 +1548,18 @@
     const llevarFilas = r.llevar, cortarTodas = r.falta.filter(x => !trNoCortar[x.key] && !trLiq(x)), descartadas = new Map();
     const est = new Map(); cortarTodas.forEach(x => { if (!est.has(x.key)) est.set(x.key, trEstadoCorte(x.k, x.key)); });
     const cortarFilas = cortarTodas.filter(x => /libre|vencida/.test(est.get(x.key).tipo)), enCursoFilas = cortarTodas.filter(x => /app|manual/.test(est.get(x.key).tipo));
+    // Nov 2026: mínimo para repetir corte: 100 u. por artículo, sin contar colores con menos de 10. Lo que no llega queda aparte.
+    const TR_MIN_CORTE = 100, TR_MIN_COLOR = 10, trChicos = new Map(), trTotCol = new Map(), trTotArt = new Map();
+    cortarFilas.forEach(x => { const kk = x.key + "|" + x.co; trTotCol.set(kk, (trTotCol.get(kk) || 0) + x.q); });
+    const trFilt = cortarFilas.filter(x => { const t = trTotCol.get(x.key + "|" + x.co); if (t >= TR_MIN_COLOR) return true; const m = trChicos.get(x.key) || new Map(); m.set(x.co, t); trChicos.set(x.key, m); return false; });
+    trFilt.forEach(x => trTotArt.set(x.key, (trTotArt.get(x.key) || 0) + x.q));
+    const cortarOk = trFilt.filter(x => trTotArt.get(x.key) >= TR_MIN_CORTE), cortarBajo = cortarFilas.filter(x => !(trTotArt.get(x.key) >= TR_MIN_CORTE));
     // Marca manual que ya no hace falta: la app de fábrica tiene el corte.
     if (fabSec) Object.entries(trEnCurso).forEach(([key, v]) => { if (v && v.k && cortesCurso.get(stNorm(v.k))) db.ref("dashboard_encurso/" + key).remove(); });
     r.falta.filter(x => trNoCortar[x.key]).forEach(x => descartadas.set(x.key, x));
     const sum = a => a.reduce((s, x) => s + x.q, 0);
     let h = `<div class="text-xs text-slate-400">Venta de 2 semanas: local del ${fl(r.lv.desde)} al ${fl(r.lv.hasta)} y web de los últimos 15 días · stock: fábrica al momento (Tienda Nube), Avellaneda de la planilla del ${fl(stockActual.fecha)}. Al local van sus 2 semanas de venta (y al menos 1 por talle en los colores que vende) sin tocar las 2 semanas de la web. Para cortar: lo que falta para eso más 2 semanas de local de colchón en fábrica.</div>
-      <div class="flex gap-6 border-b border-slate-200" style="font-size:16px">${[["llevar", "Llevar al local", sum(llevarFilas)], ["cortar", "Para cortar", sum(cortarFilas)]].map(([k, l, u]) => `<button data-trtab="${k}" class="py-2 ${trTab === k ? "font-semibold" : "text-slate-500"}" style="${trTab === k ? "border-bottom:2px solid #416096" : ""}">${l} · ${fmtNum(u)}</button>`).join("")}</div>`;
+      <div class="flex gap-6 border-b border-slate-200" style="font-size:16px">${[["llevar", "Llevar al local", sum(llevarFilas)], ["cortar", "Para cortar", sum(cortarOk)]].map(([k, l, u]) => `<button data-trtab="${k}" class="py-2 ${trTab === k ? "font-semibold" : "text-slate-500"}" style="${trTab === k ? "border-bottom:2px solid #416096" : ""}">${l} · ${fmtNum(u)}</button>`).join("")}</div>`;
     if (trTab === "llevar") {
       const cats = agrupar(llevarFilas);
       h += cats.length ? `<div class="flex justify-end"><button class="pill active" id="trNinox" style="font-size:14px;padding:8px 16px">Ver para hacer la transferencia en Ninox</button></div>` : "";
@@ -1562,7 +1568,7 @@
           <div class="flex flex-wrap gap-1.5 mt-2">${g.rows.sort((a, b) => b.q - a.q).map(x => `<span class="chip" style="background:#E6F1FB;color:#0C447C;font-size:13px;padding:4px 10px" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${focoEsc(x.co)} ${focoEsc(x.ta)} · ${fmtNum(x.q)}</span>`).join("")}</div></div></div>`).join(""), i === 0)).join("")
         : `<div class="card p-4 text-sm text-slate-500">Nada para llevar: el local tiene lo de sus 2 semanas o fábrica no tiene de más.</div>`;
     } else {
-      const cats = agrupar(cortarFilas);
+      const cats = agrupar(cortarOk), catsBajo = agrupar(cortarBajo);
       const grilla = g => { const cols = [...new Set(g.rows.map(x => x.co))], tas = [...new Set(g.rows.map(x => x.ta))].sort((a, b) => trTalleOrd(a) - trTalleOrd(b)), q = new Map(g.rows.map(x => [x.co + "|" + x.ta, x]));
         const totCol = c => g.rows.filter(x => x.co === c).reduce((s, x) => s + x.q, 0);
         return `<div class="overflow-x-auto"><table class="text-sm mt-2"><thead><tr><th></th>${tas.map(t => `<th class="px-2 text-slate-400 font-normal">${focoEsc(t)}</th>`).join("")}<th class="px-2 text-slate-400 font-normal">Total</th></tr></thead><tbody>${cols.sort((a, b) => totCol(b) - totCol(a)).map(c => `<tr><td class="pr-3 py-0.5 whitespace-nowrap">${focoEsc(c)}</td>${tas.map(t => { const x = q.get(c + "|" + t); return `<td class="px-1 py-0.5 text-center">${x ? `<span class="inline-block rounded px-2" style="background:#FCEBEB;color:#A32D2D;min-width:32px" title="2 semanas: local ${x.L}, web ${x.W} · hoy: fábrica ${x.n}, Avellaneda ${x.a}">${fmtNum(x.q)}</span>` : `<span class="text-slate-300">—</span>`}</td>`; }).join("")}<td class="px-2 text-center font-semibold">${fmtNum(totCol(c))}</td></tr>`).join("")}</tbody></table></div>`; };
@@ -1577,10 +1583,14 @@
             <input id="trManualNota" class="block w-full mt-2 border border-slate-300 rounded-lg px-2 py-1 text-sm" placeholder="N° de corte o nota (opcional)" style="background:#fff">
             <div class="flex gap-2 mt-2"><button class="pill" style="${azul}" data-trmanualok="${focoEsc(g.key)}">Guardar</button><button class="pill" data-trcerrar="1">Cancelar</button></div></div>`;
         return x; };
-      h += cats.length ? cats.map((c, i) => catBox(c, tarjetas(c.arts.map(g => `<div class="border border-slate-200 rounded-xl p-3 bg-white"><div class="flex flex-col gap-2">
+      const trChicosTxt = g => { const m = trChicos.get(g.key); return m && m.size && trTotArt.get(g.key) >= TR_MIN_CORTE ? `<div class="text-xs text-slate-400 mt-1">Fuera de la tiza (menos de ${TR_MIN_COLOR}): ${[...m].map(([co, t]) => focoEsc(co) + " " + fmtNum(t)).join(" · ")}</div>` : ""; };
+      const tarjCorte = g => `<div class="border border-slate-200 rounded-xl p-3 bg-white"><div class="flex flex-col gap-2">
           <div class="flex gap-3 min-w-0 ${g.p ? "cursor-pointer" : ""}" ${g.p ? `data-prodopen="${g.p.id}"` : ""}>${foto(g.p, 44)}<div class="min-w-0"><div class="font-semibold" style="font-size:16px">${focoEsc(g.d)}</div><div style="color:#9B5C6B;font-size:13px">≈ ${fmtNum(g.u)} a cortar · ${focoEsc(g.k)}</div></div></div>
-          <div class="flex flex-wrap gap-1.5"><button class="pill" data-nocortar="${focoEsc(g.key)}" data-nocd="${focoEsc(g.d)}">No cortar más</button><button class="pill" data-trabrir="manual" data-trk="${focoEsc(g.key)}">Ya está en curso</button><button class="pill" style="${azul}" data-trabrir="mandar" data-trk="${focoEsc(g.key)}">Mandar a Fábrica</button></div></div>${grillaRep(g, "#FCEBEB", "#A32D2D")}${accion(g)}</div>`).join("")), i === 0)).join("")
-        : `<div class="card p-4 text-sm text-slate-500">${enCursoFilas.length ? "Lo que falta ya está en fábrica (abajo)." : "No falta nada para las 2 semanas de cada lado."}</div>`;
+          <div class="flex flex-wrap gap-1.5"><button class="pill" data-nocortar="${focoEsc(g.key)}" data-nocd="${focoEsc(g.d)}">No cortar más</button><button class="pill" data-trabrir="manual" data-trk="${focoEsc(g.key)}">Ya está en curso</button><button class="pill" style="${azul}" data-trabrir="mandar" data-trk="${focoEsc(g.key)}">Mandar a Fábrica</button></div></div>${grillaRep(g, "#FCEBEB", "#A32D2D")}${trChicosTxt(g)}${accion(g)}</div>`;
+      h += cats.length ? cats.map((c, i) => catBox(c, tarjetas(c.arts.map(tarjCorte).join("")), i === 0)).join("")
+        : `<div class="card p-4 text-sm text-slate-500">${catsBajo.length ? `Ningún artículo llega al mínimo de ${TR_MIN_CORTE} u. (abajo).` : enCursoFilas.length ? "Lo que falta ya está en fábrica (abajo)." : "No falta nada para las 2 semanas de cada lado."}</div>`;
+      if (catsBajo.length) { const ab = catsBajo.flatMap(c => c.arts).sort((a, b) => b.u - a.u);
+        h += `<details class="card"><summary class="flex justify-between items-center gap-2 px-4 py-3 cursor-pointer" style="font-size:16px"><span class="font-semibold">No llegan al mínimo · menos de ${TR_MIN_CORTE} u.</span><span style="color:#9B5C6B;font-size:14px">${fmtNum(ab.length)} artículos · ${fmtNum(sum(cortarBajo))} prendas</span></summary><div class="px-4 pt-3 text-sm text-slate-500">No se repiten solos. Si alguno igual hace falta (por ejemplo, se vende rápido), mandalo a Fábrica desde acá.</div>${tarjetas(ab.map(tarjCorte).join(""))}</details>`; }
       // Ya en fábrica: no cortar otro. Si el corte ya se cortó, se resta por color (capas × curva).
       const enCats = agrupar(enCursoFilas), enArts = enCats.flatMap(c => c.arts);
       if (enArts.length) {
@@ -1627,7 +1637,7 @@
     cont.querySelectorAll("[data-nocortar]").forEach(b => b.onclick = e => { e.stopPropagation(); db.ref("dashboard_nocortar/" + b.dataset.nocortar).set({ d: b.dataset.nocd, ts: Date.now() }); });
     cont.querySelectorAll("[data-sicortar]").forEach(b => b.onclick = () => db.ref("dashboard_nocortar/" + b.dataset.sicortar).remove());
     cont.querySelectorAll("[data-sacarliq]").forEach(b => b.onclick = () => db.ref("dashboard_familias/art/" + b.dataset.sacarliq + "/liq").remove());
-    const artDe = key => { const rows = cortarFilas.filter(x => x.key === key); if (!rows.length) return null; const f = rows[0]; return { k: f.k, key, d: f.d, p: f.p, rows, u: rows.reduce((s, x) => s + x.q, 0) }; };
+    const artDe = key => { const rows = (trTotArt.get(key) >= TR_MIN_CORTE ? trFilt : cortarFilas).filter(x => x.key === key); if (!rows.length) return null; const f = rows[0]; return { k: f.k, key, d: f.d, p: f.p, rows, u: rows.reduce((s, x) => s + x.q, 0) }; };
     cont.querySelectorAll("[data-trabrir]").forEach(b => b.onclick = e => { e.stopPropagation(); trAbierto = { key: b.dataset.trk, modo: b.dataset.trabrir }; renderTransf(); });
     cont.querySelectorAll("[data-trcerrar]").forEach(b => b.onclick = e => { e.stopPropagation(); trAbierto = null; renderTransf(); });
     cont.querySelectorAll("[data-trmanualok]").forEach(b => b.onclick = e => { e.stopPropagation(); const g = artDe(b.dataset.trmanualok); if (!g) return;
